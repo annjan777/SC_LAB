@@ -152,6 +152,11 @@ router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req: 
     const token = generatePasswordResetToken(user.id, user.email);
     const resetUrl = `${APP_URL}/reset-password?token=${token}`;
 
+    // Invalidate the old password so the user cannot log in with it anymore
+    const randomPassword = crypto.randomBytes(32).toString('hex');
+    const randomHash = await bcrypt.hash(randomPassword, 10);
+    await query('UPDATE users SET password_hash = $1 WHERE id = $2', [randomHash, user.id]);
+
     const sendResult = await sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl);
     if (!sendResult.success) {
       console.log(`\n======================================================`);
