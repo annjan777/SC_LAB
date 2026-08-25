@@ -193,21 +193,12 @@ router.put('/users/:id/permissions', authenticate, requirePermission('manage_rol
       const rolePermsRes = await query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [targetRoleId]);
       const rolePermIds = rolePermsRes.rows.map(r => r.permission_id);
 
-      // Determine explicit denies (inherited but unchecked)
-      const deniedPerms = rolePermIds.filter(id => !pids.includes(id));
-      
       // Determine explicit grants (checked but not inherited)
       const grantedPerms = pids.filter(id => !rolePermIds.includes(id));
 
-      for (const pid of deniedPerms) {
-        await query(
-          'INSERT INTO user_permissions (user_id, permission_id, granted_by, is_granted) VALUES ($1, $2, $3, false) ON CONFLICT DO NOTHING',
-          [req.params.id, pid, req.user!.id]
-        );
-      }
       for (const pid of grantedPerms) {
         await query(
-          'INSERT INTO user_permissions (user_id, permission_id, granted_by, is_granted) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING',
+          'INSERT INTO user_permissions (user_id, permission_id, granted_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
           [req.params.id, pid, req.user!.id]
         );
       }
