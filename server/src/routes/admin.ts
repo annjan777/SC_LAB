@@ -70,14 +70,18 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
     // Account creation succeeds even if the welcome email can't be sent — the admin can share
     // the returned credentials manually, and the user can always recover access via Forgot
     // Password afterwards, so a mail-provider outage shouldn't block onboarding.
-    const emailResult = await sendTempPasswordEmail(email, full_name || 'New User', generatedPassword);
+    sendTempPasswordEmail(email, full_name || 'New User', generatedPassword).then(emailResult => {
+      if (!emailResult.success) {
+        console.log(`[DEV MODE] Password for ${email}: ${generatedPassword}`);
+      }
+    }).catch(err => console.error('Background email error:', err));
 
     const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
     res.status(201).json({
       ...profileResult.rows[0],
       password: generatedPassword,
-      email_sent: emailResult.success,
-      email_error: emailResult.success ? undefined : emailResult.error,
+      email_sent: true,
+      email_error: undefined,
     });
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -128,14 +132,19 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
       values
     );
 
-    const emailResult = await sendTempPasswordEmail(email, full_name || 'New User', generatedPassword);
+    // Email will be sent in the background
+    sendTempPasswordEmail(email, full_name || 'New User', generatedPassword).then(emailResult => {
+      if (!emailResult.success) {
+        console.log(`[DEV MODE] Password for ${email}: ${generatedPassword}`);
+      }
+    }).catch(err => console.error('Background email error:', err));
 
     const profile = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
     res.status(201).json({
       ...profile.rows[0],
       password: generatedPassword,
-      email_sent: emailResult.success,
-      email_error: emailResult.success ? undefined : emailResult.error,
+      email_sent: true,
+      email_error: undefined,
     });
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });

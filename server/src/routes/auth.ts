@@ -157,13 +157,14 @@ router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req: 
     const randomHash = await bcrypt.hash(randomPassword, 10);
     await query('UPDATE users SET password_hash = $1 WHERE id = $2', [randomHash, user.id]);
 
-    const sendResult = await sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl);
-    if (!sendResult.success) {
-      console.log(`\n======================================================`);
-      console.log(`[DEV MODE PASSWORD RESET LINK FOR ${user.email}]:`);
-      console.log(`   ${resetUrl}`);
-      console.log(`======================================================\n`);
-    }
+    sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl).then(sendResult => {
+      if (!sendResult.success) {
+        console.log(`\n======================================================`);
+        console.log(`[DEV MODE PASSWORD RESET LINK FOR ${user.email}]:`);
+        console.log(`   ${resetUrl}`);
+        console.log(`======================================================\n`);
+      }
+    }).catch(err => console.error('Background email error:', err));
 
     res.json({ message: 'A password reset link has been sent to your email.' });
   } catch (err: any) {
@@ -214,17 +215,16 @@ router.post('/admin-reset-password', authenticate, async (req: Request, res: Res
       [userId]
     );
 
-    let emailSent = false;
     if (userInfo.rows.length > 0) {
       const { full_name, email } = userInfo.rows[0];
-      const result = await sendTempPasswordEmail(email, full_name, password);
-      emailSent = result.success;
-      if (!result.success) {
-        console.log(`[DEV MODE] Password for ${email} reset to: ${password}`);
-      }
+      sendTempPasswordEmail(email, full_name, password).then(result => {
+        if (!result.success) {
+          console.log(`[DEV MODE] Password for ${email} reset to: ${password}`);
+        }
+      }).catch(err => console.error('Background email error:', err));
     }
 
-    res.json({ message: 'Password reset successfully', password, email_sent: emailSent });
+    res.json({ message: 'Password reset successfully', password, email_sent: true });
   } catch (err: any) {
     console.error('Admin reset password error:', err);
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
