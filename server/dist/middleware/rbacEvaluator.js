@@ -58,16 +58,6 @@ export function matchResourcePattern(pattern, path) {
 export function evaluateRbacPolicy(userRole, path, method, userPermissions) {
     const action = mapMethodToAction(method);
     const userRoles = expandUserRoles(userRole);
-    // If user is SUPER_ADMIN or ADMIN (or user_role in DB is admin/super_admin), allow access
-    const normRole = (userRole || '').toUpperCase();
-    if (normRole === 'ADMIN' || normRole === 'SUPER_ADMIN') {
-        return {
-            allowed: true,
-            effect: 'allow',
-            priority: 100,
-            reason: `Allowed for ${normRole}`,
-        };
-    }
     const matchedRules = [];
     // Evaluate explicit user permissions using dynamic PERMISSION_POLICIES
     if (userPermissions && userPermissions.size > 0) {

@@ -151,10 +151,21 @@ export const SC_LAB_RBAC_CONFIG = {
                 '/api/purchase-requests/**',
                 '/api/leave-requests/**',
                 '/api/admin-comments/**',
+                '/api/auth/admin-reset-password',
             ],
             action: ['read', 'write', 'delete'],
             effect: 'allow',
             priority: 30,
+        },
+        // Full data export/import is Super Admin only — explicitly deny ADMIN here even though
+        // /api/admin/** above would otherwise cover it, since this can read or replace the entire
+        // database and every uploaded file.
+        {
+            role: 'ADMIN',
+            resource: '/api/admin/backup/**',
+            action: ['read', 'write', 'delete'],
+            effect: 'deny',
+            priority: 35,
         },
         {
             role: 'SUPER_ADMIN',

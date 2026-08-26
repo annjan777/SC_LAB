@@ -68,7 +68,7 @@ const upload = multer({
         const ext = path.extname(file.originalname).toLowerCase();
         const blocked = ['.html', '.htm', '.js', '.mjs', '.cjs', '.ts', '.exe', '.sh', '.bat', '.cmd', '.php', '.py', '.svg'];
         if (blocked.includes(ext)) {
-            return cb(new Error('File type not allowed for security reasons'));
+            return cb(Object.assign(new Error('File type not allowed for security reasons'), { statusCode: 400 }));
         }
         cb(null, true);
     }

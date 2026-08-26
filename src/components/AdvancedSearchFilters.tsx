@@ -43,7 +43,7 @@ export default function AdvancedSearchFilters({ filters, onChange, defaultExpand
 
   useEffect(() => {
     const fetchSuggestions = async () => {
-      if (!activeCategory || searchTerm.length < 1) {
+      if (!activeCategory) {
         setSuggestions([]);
         return;
       }
@@ -57,7 +57,10 @@ export default function AdvancedSearchFilters({ filters, onChange, defaultExpand
         });
 
         if (!error && data) {
-          setSuggestions(Array.isArray(data) ? data : []);
+          const formattedSuggestions = Array.isArray(data) ? data.map((item: any) => 
+            typeof item === 'string' ? { name: item, usage_count: 1 } : item
+          ) : [];
+          setSuggestions(formattedSuggestions);
         }
       } catch (err) {
         console.error('Error fetching suggestions:', err);
@@ -131,10 +134,31 @@ export default function AdvancedSearchFilters({ filters, onChange, defaultExpand
       {activeCategory === category && (
         <div className="absolute z-20 mt-2 w-80 bg-white border border-gray-300 rounded-lg shadow-lg">
           <div className="p-3 border-b border-gray-200">
+            {filters[category].length > 0 && (
+              <div className="flex justify-end mb-2">
+                <button
+                  onClick={() => {
+                    onChange({ ...filters, [category]: [] });
+                    if (category === 'skills') {
+                       // Ensure the user specifically asked for skills, but this applies to all dynamically!
+                    }
+                  }}
+                  className="text-xs text-blue-600 hover:text-blue-800 font-medium"
+                >
+                  Reset {label}
+                </button>
+              </div>
+            )}
             <input
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && searchTerm.trim()) {
+                  e.preventDefault();
+                  handleAddFilter(category, searchTerm.trim());
+                }
+              }}
               placeholder={`Search ${label.toLowerCase()}...`}
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               autoFocus
@@ -169,13 +193,13 @@ export default function AdvancedSearchFilters({ filters, onChange, defaultExpand
 
           {!loading && searchTerm.length >= 1 && suggestions.length === 0 && (
             <div className="p-4 text-center text-gray-500 text-sm">
-              No {label.toLowerCase()} found
+              No {label.toLowerCase()} found. Press Enter to add "{searchTerm}".
             </div>
           )}
 
-          {searchTerm.length < 1 && (
+          {!loading && searchTerm.length < 1 && suggestions.length === 0 && (
             <div className="p-4 text-center text-gray-500 text-sm">
-              Type to search {label.toLowerCase()}
+              Type to search or add new {label.toLowerCase()}
             </div>
           )}
         </div>

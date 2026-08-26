@@ -157,7 +157,7 @@ export default function NotificationsPage() {
       return;
     }
 
-    await api.post('/api/notifications/archive-all');
+    await api.delete('/api/notifications/archived-all');
     fetchNotifications();
   };
 

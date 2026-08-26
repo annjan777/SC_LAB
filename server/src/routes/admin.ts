@@ -6,6 +6,7 @@ import { query } from '../config/database.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 import { sendTempPasswordEmail, generateTempPassword } from '../utils/email.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
+import { createNotification } from '../services/notificationService.js';
 
 const router = Router();
 
@@ -296,6 +297,20 @@ router.put('/purchase-requests/:id/approve', authenticate, requirePermission('ap
        RETURNING *`,
       [req.user!.id, req.params.id]
     );
+    
+    if (result.rows[0]) {
+      const pr = result.rows[0];
+      await createNotification({
+        userId: pr.requested_by,
+        type: 'procurement',
+        title: 'Purchase Request Approved',
+        message: `Your purchase request for ${pr.item_name || 'an item'} has been approved.`,
+        relatedEntityType: 'purchase_requests',
+        relatedEntityId: pr.id,
+        actionUrl: `/purchases`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -311,6 +326,20 @@ router.put('/purchase-requests/:id/reject', authenticate, requirePermission('app
        RETURNING *`,
       [req.user!.id, req.body.rejection_reason || null, req.params.id]
     );
+
+    if (result.rows[0]) {
+      const pr = result.rows[0];
+      await createNotification({
+        userId: pr.requested_by,
+        type: 'procurement',
+        title: 'Purchase Request Rejected',
+        message: `Your purchase request for ${pr.item_name || 'an item'} was rejected.`,
+        relatedEntityType: 'purchase_requests',
+        relatedEntityId: pr.id,
+        actionUrl: `/purchases`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -326,6 +355,20 @@ router.put('/purchase-requests/:id/status', authenticate, requirePermission('app
        RETURNING *`,
       [req.body.status, req.user!.id, req.params.id]
     );
+
+    if (result.rows[0]) {
+      const pr = result.rows[0];
+      await createNotification({
+        userId: pr.requested_by,
+        type: 'procurement',
+        title: 'Purchase Request Status Updated',
+        message: `Your purchase request status was updated to ${req.body.status}.`,
+        relatedEntityType: 'purchase_requests',
+        relatedEntityId: pr.id,
+        actionUrl: `/purchases`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -403,6 +446,20 @@ router.put('/leave-requests/:id/approve', authenticate, requirePermission('appro
        RETURNING *`,
       [req.user!.id, req.params.id]
     );
+
+    if (result.rows[0]) {
+      const lr = result.rows[0];
+      await createNotification({
+        userId: lr.requested_by,
+        type: 'leave',
+        title: 'Leave Request Approved',
+        message: `Your leave request has been approved.`,
+        relatedEntityType: 'leave_requests',
+        relatedEntityId: lr.id,
+        actionUrl: `/leaves`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -418,6 +475,20 @@ router.put('/leave-requests/:id/reject', authenticate, requirePermission('approv
        RETURNING *`,
       [req.user!.id, req.body.admin_remarks || null, req.params.id]
     );
+
+    if (result.rows[0]) {
+      const lr = result.rows[0];
+      await createNotification({
+        userId: lr.requested_by,
+        type: 'leave',
+        title: 'Leave Request Rejected',
+        message: `Your leave request was rejected.`,
+        relatedEntityType: 'leave_requests',
+        relatedEntityId: lr.id,
+        actionUrl: `/leaves`
+      });
+    }
+
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -640,6 +711,20 @@ router.post('/work/:id/comments', authenticate, requirePermission('create_work')
        RETURNING *`,
       [req.params.id, comment, req.user!.id]
     );
+
+    const workResult = await query('SELECT user_id, project_name FROM assigned_works WHERE id = $1', [req.params.id]);
+    if (workResult.rows[0] && workResult.rows[0].user_id !== req.user!.id) {
+      await createNotification({
+        userId: workResult.rows[0].user_id,
+        type: 'work',
+        title: 'New Comment on Your Work',
+        message: `An admin commented on your work: ${workResult.rows[0].project_name}`,
+        relatedEntityType: 'assigned_works',
+        relatedEntityId: req.params.id,
+        actionUrl: `/work-overview`
+      });
+    }
+
     res.status(201).json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });

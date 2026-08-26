@@ -34,7 +34,7 @@ export async function initializeSuperAdmin() {
       WHERE up.role_id IS NULL AND LOWER(r.name) = LOWER(up.user_role);
     `);
         // Check if any admin profile already exists
-        const checkAdmin = await query("SELECT id FROM user_profiles WHERE user_role = 'admin' LIMIT 1");
+        const checkAdmin = await query("SELECT id FROM user_profiles WHERE user_role IN ('admin', 'super_admin') LIMIT 1");
         if (checkAdmin.rows.length > 0) {
             return; // Admin account already exists
         }

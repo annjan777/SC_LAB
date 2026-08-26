@@ -7,9 +7,18 @@ const router = Router();
 function canManage(req, perm) {
     return req.user.permissions.has(perm);
 }
-async function loadWorkOwner(workId) {
-    const r = await query('SELECT user_id FROM assigned_works WHERE id = $1', [workId]);
-    return r.rows[0]?.user_id ?? null;
+async function loadWorkOwner(workId, reqUser) {
+    const r = await query('SELECT user_id, assigned_by FROM assigned_works WHERE id = $1', [workId]);
+    if (!r.rows[0])
+        return null;
+    const { user_id, assigned_by } = r.rows[0];
+    if (reqUser && assigned_by) {
+        const u = await query('SELECT full_name FROM user_profiles WHERE id = $1', [reqUser.id]);
+        if (u.rows[0]?.full_name === assigned_by) {
+            return reqUser.id; // Trick the route into allowing access by returning current user's ID
+        }
+    }
+    return user_id;
 }
 function mapWorkRow(row) {
     return {
@@ -20,6 +29,26 @@ function mapWorkRow(row) {
             email: row.user_email || null,
         },
     };
+}
+// Recomputes completion_percentage from milestone completion ratio and logs it as a new
+// progress entry, so overall progress always reflects milestones — rising as they're checked
+// off, falling back down if one is unchecked. No-ops when a work item has no milestones, since
+// there's nothing to derive a ratio from (manual progress updates remain the only signal then).
+async function recalculateProgressFromMilestones(client, workId) {
+    const milestonesResult = await client.query('SELECT status FROM work_milestones WHERE work_id = $1', [workId]);
+    const total = milestonesResult.rows.length;
+    if (total === 0)
+        return;
+    const completed = milestonesResult.rows.filter((m) => m.status === 'completed').length;
+    const percentage = Math.round((completed / total) * 100);
+    const status = percentage === 100 ? 'completed' : percentage === 0 ? 'not_started' : 'in_progress';
+    await client.query(`INSERT INTO progress_updates (work_id, update_date, status, completion_percentage, summary)
+     VALUES ($1, CURRENT_DATE, $2, $3, $4)`, [
+        workId,
+        status,
+        percentage,
+        `Auto-updated from milestones: ${completed} of ${total} completed (${percentage}%).`,
+    ]);
 }
 async function listMitigationActions(problemId) {
     const result = await query(`SELECT
@@ -43,7 +72,7 @@ router.get('/', authenticate, async (req, res) => {
         const params = [];
         const conditions = [];
         if (!canReadAll) {
-            conditions.push(`aw.user_id = $${params.length + 1}`);
+            conditions.push(`(aw.user_id = $${params.length + 1} OR aw.assigned_by = (SELECT full_name FROM user_profiles WHERE id = $${params.length + 1}))`);
             params.push(req.user.id);
         }
         if (req.query.user_id && canReadAll) {
@@ -79,6 +108,9 @@ router.post('/', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'Insufficient permissions' });
         }
         const { user_id, project_name, assigned_by, work_title, description, start_date, end_date, priority, milestones = [], initial_status, initial_percentage, progress_notes, } = req.body;
+        if (!assigned_by) {
+            return res.status(400).json({ error: 'assigned_by is required' });
+        }
         const ownerId = user_id || req.user.id;
         const createdWork = await transaction(async (client) => {
             const workResult = await client.query(`INSERT INTO assigned_works
@@ -144,7 +176,7 @@ router.get('/:id', authenticate, async (req, res) => {
 // PUT /api/work/:id - owner may update their own work; others need edit_work
 router.put('/:id', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         const hasManagerPerm = canManage(req, 'edit_work');
@@ -208,6 +240,9 @@ router.put('/:id', authenticate, async (req, res) => {
                     ]);
                 }
             }
+            if (milestones.length > 0 || deletedMilestoneIds.length > 0) {
+                await recalculateProgressFromMilestones(client, req.params.id);
+            }
             return updated;
         });
         res.json(result.rows[0]);
@@ -220,7 +255,7 @@ router.put('/:id', authenticate, async (req, res) => {
 // DELETE /api/work/:id - requires delete_work permission (or admin)
 router.delete('/:id', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (!canManage(req, 'delete_work')) {
@@ -238,7 +273,7 @@ router.delete('/:id', authenticate, async (req, res) => {
 // GET /api/work/:id/milestones
 router.get('/:id/milestones', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'view_work')) {
@@ -267,14 +302,18 @@ router.get('/:id/milestones', authenticate, async (req, res) => {
 });
 router.post('/:id/milestones', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'edit_work')) {
             return res.status(403).json({ error: 'Insufficient permissions' });
         }
         const { title, target_date, status } = req.body;
-        const result = await query('INSERT INTO work_milestones (work_id, title, target_date, status) VALUES ($1,$2,$3,$4) RETURNING *', [req.params.id, title, target_date, status || 'pending']);
+        const result = await transaction(async (client) => {
+            const inserted = await client.query('INSERT INTO work_milestones (work_id, title, target_date, status) VALUES ($1,$2,$3,$4) RETURNING *', [req.params.id, title, target_date, status || 'pending']);
+            await recalculateProgressFromMilestones(client, req.params.id);
+            return inserted;
+        });
         res.status(201).json(result.rows[0]);
     }
     catch (err) {
@@ -284,7 +323,7 @@ router.post('/:id/milestones', authenticate, async (req, res) => {
 });
 router.put('/:id/milestones/:milestoneId', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'edit_work')) {
@@ -308,10 +347,16 @@ router.put('/:id/milestones/:milestoneId', authenticate, async (req, res) => {
         const setClause = safeKeys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
         const values = rawKeys.map(k => fields[k]);
         values.push(req.params.milestoneId, req.params.id);
-        const result = await query(`UPDATE work_milestones
+        const result = await transaction(async (client) => {
+            const updated = await client.query(`UPDATE work_milestones
        SET ${setClause}
        WHERE id = $${values.length - 1} AND work_id = $${values.length}
        RETURNING *`, values);
+            if (fields.status !== undefined) {
+                await recalculateProgressFromMilestones(client, req.params.id);
+            }
+            return updated;
+        });
         res.json(result.rows[0]);
     }
     catch (err) {
@@ -322,7 +367,7 @@ router.put('/:id/milestones/:milestoneId', authenticate, async (req, res) => {
 // GET /api/work/:id/progress
 router.get('/:id/progress', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'view_work')) {
@@ -351,7 +396,7 @@ router.get('/:id/progress', authenticate, async (req, res) => {
 });
 router.post('/:id/progress', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'edit_work')) {
@@ -378,7 +423,7 @@ router.post('/:id/progress', authenticate, async (req, res) => {
 // GET /api/work/:id/problems
 router.get('/:id/problems', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'view_work')) {
@@ -416,7 +461,7 @@ router.get('/:id/problems', authenticate, async (req, res) => {
 });
 router.post('/:id/problems', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'edit_work')) {
@@ -442,7 +487,7 @@ router.post('/:id/problems', authenticate, async (req, res) => {
 });
 router.put('/:id/problems/:problemId', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'edit_work')) {
@@ -482,7 +527,7 @@ router.put('/:id/problems/:problemId', authenticate, async (req, res) => {
 // GET /api/work/:id/comments - visible to the work's owner and staff with view_work
 router.get('/:id/comments', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'view_work')) {
@@ -506,10 +551,14 @@ router.get('/:id/comments', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
-// POST /api/work/:id/comments - admin-comments are, by design, authored by admins/managers only
+// POST /api/work/:id/comments
 router.post('/:id/comments', authenticate, async (req, res) => {
     try {
-        if (!canManage(req, 'edit_work')) {
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
+        if (ownerId === null)
+            return res.status(404).json({ error: 'Not found' });
+        // Check if the user is an admin OR if the user is the owner/supervisor of the work
+        if (!canManage(req, 'edit_work') && ownerId !== req.user.id) {
             return res.status(403).json({ error: 'Insufficient permissions' });
         }
         const comment = req.body.comment || req.body.comment_text;
@@ -527,7 +576,7 @@ router.post('/:id/comments/mark-read', authenticate, async (_req, res) => {
 // Dependencies
 router.get('/:id/dependencies', authenticate, async (req, res) => {
     try {
-        const ownerId = await loadWorkOwner(req.params.id);
+        const ownerId = await loadWorkOwner(req.params.id, req.user);
         if (ownerId === null)
             return res.status(404).json({ error: 'Not found' });
         if (ownerId !== req.user.id && !canManage(req, 'view_work')) {

@@ -5,19 +5,34 @@ dotenv.config();
 pg.types.setTypeParser(1082, (val) => val);
 const { Pool } = pg;
 const useSsl = process.env.DB_SSL === 'true';
-export const pool = new Pool({
-    host: process.env.DB_HOST || 'localhost',
-    port: parseInt(process.env.DB_PORT || '5432'),
-    database: process.env.DB_NAME || 'sclab',
-    user: process.env.DB_USER || process.env.USER || 'postgres',
-    password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : '',
-    ssl: useSsl ? { rejectUnauthorized: false } : false,
-    max: 50,
-    idleTimeoutMillis: 30000,
-});
-pool.on('error', (err) => {
-    console.error('Unexpected error on idle DB client:', err);
-});
+function createPool() {
+    const p = new Pool({
+        host: process.env.DB_HOST || 'localhost',
+        port: parseInt(process.env.DB_PORT || '5432'),
+        database: process.env.DB_NAME || 'sclab',
+        user: process.env.DB_USER || process.env.USER || 'postgres',
+        password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : '',
+        ssl: useSsl ? { rejectUnauthorized: false } : false,
+        max: 50,
+        idleTimeoutMillis: 30000,
+    });
+    p.on('error', (err) => {
+        console.error('Unexpected error on idle DB client:', err);
+    });
+    return p;
+}
+// Exported as `let` (a live ES module binding) rather than `const` so the admin data-restore
+// flow can close and replace it — pg_restore needs the pool's connections closed first so it
+// can drop/recreate objects without lock conflicts.
+export let pool = createPool();
+// Closes all pooled connections. Call before running pg_restore against this database.
+export async function closePoolForRestore() {
+    await pool.end();
+}
+// Opens a fresh pool after a restore completes (the old one was ended and can't be reused).
+export function reopenPool() {
+    pool = createPool();
+}
 export async function query(text, params) {
     const result = await pool.query(text, params);
     return result;

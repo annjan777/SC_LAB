@@ -92,7 +92,7 @@ echo ""
 
 # Start backend in background
 cd server
-npx tsx src/index.ts &
+npx tsx watch src/index.ts &
 SERVER_PID=$!
 cd ..
 

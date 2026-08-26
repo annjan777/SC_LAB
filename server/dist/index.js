@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import multer from 'multer';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
 import expertiseRoutes from './routes/expertise.js';
@@ -14,6 +15,7 @@ import settingsRoutes from './routes/settings.js';
 import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
 import workRoutes from './routes/work.js';
+import backupRoutes from './routes/backup.js';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { progressiveLoginLimiter } from './middleware/progressiveRateLimiter.js';
@@ -90,6 +92,7 @@ app.use('/api/settings', settingsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/work', workRoutes);
+app.use('/api/admin/backup', backupRoutes);
 // /api/admin/roles → CRUD on roles table
 app.get('/api/admin/roles', authenticate, requirePermission('manage_roles'), async (_req, res) => {
     const roles = await dbQuery('SELECT * FROM roles ORDER BY created_at');
@@ -142,6 +145,7 @@ app.get('/api/admin/permissions', authenticate, requirePermission('manage_roles'
 app.use('/api/admin/purchase-requests', createCrudRouter({
     table: 'purchase_requests',
     defaultOrder: 'created_at',
+    ownerCol: 'requested_by',
     readPermission: 'view_procurement',
     createPermission: 'create_purchase_request',
     updatePermission: 'approve_procurement',
@@ -268,6 +272,13 @@ app.use('/api/audit-logs', createCrudRouter({
 // Global Error Handler for API routes
 app.use('/api', (err, req, res, next) => {
     console.error('[API Error]', err);
+    // Upload validation errors (file type/size rejected before hitting a route handler)
+    if (err instanceof multer.MulterError) {
+        return res.status(400).json({ error: err.message });
+    }
+    if (err.statusCode) {
+        return res.status(err.statusCode).json({ error: err.message });
+    }
     // PostgreSQL constraint violation codes
     if (err.code) {
         switch (err.code) {
