@@ -9,9 +9,10 @@ const myxss = new FilterXSS(xssOptions);
 function sanitizeValue(val) {
     if (typeof val === 'string') {
         const cleaned = myxss.process(val);
+        // Only decode entities that cannot reconstruct tag syntax (< / > are left encoded,
+        // otherwise a pre-encoded payload like "&lt;script&gt;" would survive stripping and
+        // get turned back into a live <script> tag here).
         return cleaned
-            .replace(/&gt;/g, '>')
-            .replace(/&lt;/g, '<')
             .replace(/&quot;/g, '"')
             .replace(/&#39;/g, "'")
             .replace(/&amp;/g, '&');

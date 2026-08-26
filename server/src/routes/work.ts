@@ -10,9 +10,19 @@ function canManage(req: Request, perm: string): boolean {
   return req.user!.permissions.has(perm);
 }
 
-async function loadWorkOwner(workId: string): Promise<string | null> {
-  const r = await query('SELECT user_id FROM assigned_works WHERE id = $1', [workId]);
-  return r.rows[0]?.user_id ?? null;
+async function loadWorkOwner(workId: string, reqUser?: any): Promise<string | null> {
+  const r = await query('SELECT user_id, assigned_by FROM assigned_works WHERE id = $1', [workId]);
+  if (!r.rows[0]) return null;
+  const { user_id, assigned_by } = r.rows[0];
+
+  if (reqUser && assigned_by) {
+    const u = await query('SELECT full_name FROM user_profiles WHERE id = $1', [reqUser.id]);
+    if (u.rows[0]?.full_name === assigned_by) {
+      return reqUser.id; // Trick the route into allowing access by returning current user's ID
+    }
+  }
+
+  return user_id;
 }
 
 function mapWorkRow(row: any) {
@@ -81,7 +91,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
     const conditions: string[] = [];
 
     if (!canReadAll) {
-      conditions.push(`aw.user_id = $${params.length + 1}`);
+      conditions.push(`(aw.user_id = $${params.length + 1} OR aw.assigned_by = (SELECT full_name FROM user_profiles WHERE id = $${params.length + 1}))`);
       params.push(req.user!.id);
     }
 
@@ -217,7 +227,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 // PUT /api/work/:id - owner may update their own work; others need edit_work
 router.put('/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     const hasManagerPerm = canManage(req, 'edit_work');
     if (ownerId !== req.user!.id && !hasManagerPerm && req.user!.user_role !== 'admin' && req.user!.user_role !== 'super_admin') {
@@ -306,7 +316,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
 // DELETE /api/work/:id - requires delete_work permission (or admin)
 router.delete('/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (!canManage(req, 'delete_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -322,7 +332,7 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
 // GET /api/work/:id/milestones
 router.get('/:id/milestones', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -350,7 +360,7 @@ router.get('/:id/milestones', authenticate, async (req: Request, res: Response) 
 
 router.post('/:id/milestones', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'edit_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -370,7 +380,7 @@ router.post('/:id/milestones', authenticate, async (req: Request, res: Response)
 
 router.put('/:id/milestones/:milestoneId', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'edit_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -411,7 +421,7 @@ router.put('/:id/milestones/:milestoneId', authenticate, async (req: Request, re
 // GET /api/work/:id/progress
 router.get('/:id/progress', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -439,7 +449,7 @@ router.get('/:id/progress', authenticate, async (req: Request, res: Response) =>
 
 router.post('/:id/progress', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'edit_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -465,7 +475,7 @@ router.post('/:id/progress', authenticate, async (req: Request, res: Response) =
 // GET /api/work/:id/problems
 router.get('/:id/problems', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -502,7 +512,7 @@ router.get('/:id/problems', authenticate, async (req: Request, res: Response) =>
 
 router.post('/:id/problems', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'edit_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -539,7 +549,7 @@ router.post('/:id/problems', authenticate, async (req: Request, res: Response) =
 
 router.put('/:id/problems/:problemId', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'edit_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -577,7 +587,7 @@ router.put('/:id/problems/:problemId', authenticate, async (req: Request, res: R
 // GET /api/work/:id/comments - visible to the work's owner and staff with view_work
 router.get('/:id/comments', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
@@ -597,10 +607,14 @@ router.get('/:id/comments', authenticate, async (req: Request, res: Response) =>
   } catch (err: any) { console.error(err); res.status(500).json({ error: 'Internal Server Error' }); }
 });
 
-// POST /api/work/:id/comments - admin-comments are, by design, authored by admins/managers only
+// POST /api/work/:id/comments
 router.post('/:id/comments', authenticate, async (req: Request, res: Response) => {
   try {
-    if (!canManage(req, 'edit_work')) {
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
+    if (ownerId === null) return res.status(404).json({ error: 'Not found' });
+    
+    // Check if the user is an admin OR if the user is the owner/supervisor of the work
+    if (!canManage(req, 'edit_work') && ownerId !== req.user!.id) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const comment = req.body.comment || req.body.comment_text;
@@ -619,7 +633,7 @@ router.post('/:id/comments/mark-read', authenticate, async (_req: Request, res: 
 // Dependencies
 router.get('/:id/dependencies', authenticate, async (req: Request, res: Response) => {
   try {
-    const ownerId = await loadWorkOwner(req.params.id);
+    const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
     if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
       return res.status(403).json({ error: 'Insufficient permissions' });

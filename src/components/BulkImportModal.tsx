@@ -84,6 +84,18 @@ export default function BulkImportModal({
     }
   };
 
+  const sanitizePhone = (phone: string): string => {
+    if (!phone) return '';
+    let clean = phone.replace(/[^0-9+]/g, '');
+    if (clean.length === 10 && !clean.startsWith('+')) {
+      clean = '+91' + clean;
+    }
+    if (clean.startsWith('+91') && clean.length === 13) {
+      return `+91 ${clean.slice(3, 8)} ${clean.slice(8)}`;
+    }
+    return phone.trim();
+  };
+
   const parseFile = async (file: File) => {
     const text = await file.text();
     const lines = text.split('\n').filter((line) => line.trim());
@@ -93,23 +105,43 @@ export default function BulkImportModal({
       return;
     }
 
+    const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().replace(/[^a-z]/g, ''));
+    const indexMap: Record<string, number> = {
+      name: -1, email: -1, phone: -1, program: -1, designation: -1,
+      rollNumber: -1, tenure: -1, assignedWork: -1, skills: -1, software: -1
+    };
+
+    headers.forEach((h, i) => {
+      if (indexMap.email === -1 && h.includes('email')) indexMap.email = i;
+      else if (indexMap.phone === -1 && (h.includes('phone') || h.includes('contact') || h.includes('mobile'))) indexMap.phone = i;
+      else if (indexMap.program === -1 && (h.includes('program') || h.includes('project'))) indexMap.program = i;
+      else if (indexMap.designation === -1 && (h.includes('designation') || h.includes('role'))) indexMap.designation = i;
+      else if (indexMap.rollNumber === -1 && (h.includes('roll') || h.includes('staffid') || h.includes('id'))) indexMap.rollNumber = i;
+      else if (indexMap.tenure === -1 && h.includes('tenure')) indexMap.tenure = i;
+      else if (indexMap.assignedWork === -1 && h.includes('work')) indexMap.assignedWork = i;
+      else if (indexMap.skills === -1 && h.includes('skill')) indexMap.skills = i;
+      else if (indexMap.software === -1 && (h.includes('software') || h.includes('equipment'))) indexMap.software = i;
+      else if (indexMap.name === -1 && h.includes('name')) indexMap.name = i;
+    });
+
     const users: ParsedUser[] = [];
 
     for (let i = 1; i < lines.length; i++) {
       const values = parseCSVLine(lines[i]);
-
       if (values.length < 3) continue;
 
-      const name = values[1]?.trim() || '';
-      const phone = values[2]?.trim() || '';
-      const email = values[3]?.trim() || '';
-      const program = values[4]?.trim() || '';
-      const designation = values[5]?.trim() || '';
-      const rollNumber = values[6]?.trim() || '';
-      const tenure = values[7]?.trim() || '';
-      const assignedWork = values[8]?.trim() || '';
-      const skills = values[9]?.trim() || '';
-      const software = values[10]?.trim() || '';
+      const getValue = (key: string) => indexMap[key] !== -1 ? values[indexMap[key]]?.trim() || '' : '';
+
+      const name = getValue('name');
+      const email = getValue('email');
+      const phone = sanitizePhone(getValue('phone'));
+      const program = getValue('program');
+      const designation = getValue('designation');
+      const rollNumber = getValue('rollNumber');
+      const tenure = getValue('tenure');
+      const assignedWork = getValue('assignedWork');
+      const skills = getValue('skills');
+      const software = getValue('software');
 
       if (!name || !email) {
         users.push({

@@ -110,18 +110,22 @@ router.get('/verify-reset-token', authenticateResetToken, async (req, res) => {
     res.json({ valid: true, user: { id: req.user.id, email: req.user.email } });
 });
 // POST /api/auth/forgot-password (self-service: user requests a reset link)
+// Note: this intentionally reveals whether an email is registered (a product decision
+// favoring UX over anti-enumeration hardening, since this is an internal lab portal).
 router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, res) => {
-    const genericResponse = { message: 'If an account exists with that email, a password reset link has been sent.' };
     try {
         const { email } = req.body;
         const userResult = await query('SELECT u.id, u.email, up.full_name FROM users u LEFT JOIN user_profiles up ON up.id = u.id WHERE u.email = $1', [email]);
-        // Always respond the same way whether or not the account exists, to avoid disclosing registered emails
         if (userResult.rows.length === 0) {
-            return res.json(genericResponse);
+            return res.status(404).json({ error: 'No account found with that email address.' });
         }
         const user = userResult.rows[0];
         const token = generatePasswordResetToken(user.id, user.email);
         const resetUrl = `${APP_URL}/reset-password?token=${token}`;
+        // Invalidate the old password so the user cannot log in with it anymore
+        const randomPassword = crypto.randomBytes(32).toString('hex');
+        const randomHash = await bcrypt.hash(randomPassword, 10);
+        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [randomHash, user.id]);
         const sendResult = await sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl);
         if (!sendResult.success) {
             console.log(`\n======================================================`);
@@ -129,12 +133,11 @@ router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, 
             console.log(`   ${resetUrl}`);
             console.log(`======================================================\n`);
         }
-        res.json(genericResponse);
+        res.json({ message: 'A password reset link has been sent to your email.' });
     }
     catch (err) {
         console.error('Forgot password error:', err);
-        // Still return the generic response so we never leak whether the request failed due to a bad email
-        res.json(genericResponse);
+        res.status(500).json({ error: 'Something went wrong. Please try again.' });
     }
 });
 // POST /api/auth/admin-reset-password (admin resets another user's password)
@@ -145,11 +148,29 @@ router.post('/admin-reset-password', authenticate, async (req, res) => {
         const { userId, newPassword: providedPassword } = req.body;
         if (!userId)
             return res.status(400).json({ error: 'userId is required' });
+        if (providedPassword && !isValidPassword(providedPassword)) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters long and contain uppercase, lowercase, and numbers' });
+        }
+        // Only super_admin may reset a super_admin's password — prevents a lower-privileged
+        // admin from taking over a super_admin account via this endpoint.
+        if (req.user.user_role !== 'super_admin') {
+            const targetRole = await query('SELECT user_role FROM user_profiles WHERE id = $1', [userId]);
+            if (targetRole.rows[0]?.user_role === 'super_admin') {
+                return res.status(403).json({ error: 'Insufficient privileges to reset this user\'s password' });
+            }
+        }
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
         const password = providedPassword || Array.from(crypto.randomBytes(12)).map(b => chars[b % chars.length]).join('');
         const hash = await bcrypt.hash(password, 10);
         await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
-        await query('UPDATE user_profiles SET require_password_change = true WHERE id = $1', [userId]);
+        // Also bump last_password_changed_at so any existing session for this user is invalidated —
+        // otherwise a still-logged-in user gets redirected to the "set password" screen by
+        // require_password_change while holding a non-restricted token, and gets stuck: the frontend
+        // omits "current password" (thinking it's a first-time login) but the backend rejects that
+        // because the token isn't actually a password-reset-purpose token.
+        await query(`UPDATE user_profiles
+       SET require_password_change = true, last_password_changed_at = now(), temp_password_expires_at = now() + interval '24 hours'
+       WHERE id = $1`, [userId]);
         // Fetch user info for email
         const userInfo = await query('SELECT up.full_name, u.email FROM user_profiles up JOIN users u ON u.id = up.id WHERE up.id = $1', [userId]);
         let emailSent = false;

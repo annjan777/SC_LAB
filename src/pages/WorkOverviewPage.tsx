@@ -84,7 +84,8 @@ export default function WorkOverviewPage() {
   const [filterPriority, setFilterPriority] = useState('');
 
   const canCreateWork = hasPermission('create_work');
-  const canEditWork = hasPermission('edit_work');
+  const hasEditPerm = hasPermission('edit_work');
+  const canEditWork = (work: any) => hasEditPerm || work.user_id === user?.id || (work.assigned_by && work.assigned_by === profile?.full_name);
   const canDeleteWork = hasPermission('delete_work');
 
   useEffect(() => {
@@ -406,6 +407,9 @@ export default function WorkOverviewPage() {
                         </div>
                         <p className="text-sm text-gray-500 mb-1">
                           <span className="font-medium text-gray-700">Project:</span> {work.project_name}
+                          {work.user_id !== user?.id && work.user_name && (
+                            <> · <span className="font-medium text-gray-700">Assigned To:</span> {work.user_name}</>
+                          )}
                           {work.assigned_by && (
                             <> · <span className="font-medium text-gray-700">Assigned by:</span> {work.assigned_by}</>
                           )}
@@ -453,7 +457,7 @@ export default function WorkOverviewPage() {
                         >
                           <Eye className="h-4 w-4" />
                         </button>
-                        {canEditWork && (
+                        {canEditWork(work) && (
                           <button
                             onClick={(e) => { e.stopPropagation(); setSelectedWork(work); setShowEditModal(true); }}
                             className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition"
@@ -563,7 +567,7 @@ export default function WorkOverviewPage() {
                           >
                             Report Problem
                           </button>
-                          {canEditWork && (
+                          {canEditWork(work) && (
                             <button
                               onClick={(e) => { e.stopPropagation(); setSelectedWork(work); setShowEditModal(true); }}
                               className="px-3 py-1.5 text-sm bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition"

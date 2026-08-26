@@ -21,6 +21,59 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/notifications
+router.post('/', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { user_id, type, title, message, related_entity_type, related_entity_id, action_url } = req.body;
+    
+    // Only allow admins or people with specific permissions to create notifications for others
+    if (user_id && user_id !== req.user!.id && !req.user!.permissions.has('manage_settings')) {
+      return res.status(403).json({ error: 'Insufficient permissions' });
+    }
+
+    const targetUserId = user_id || req.user!.id;
+    
+    const result = await query(
+      `INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id, action_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+      [targetUserId, type || 'info', title, message, related_entity_type || null, related_entity_id || null, action_url || null]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    console.error(err); res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// POST /api/notifications/broadcast
+router.post('/broadcast', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { title, message, type } = req.body;
+    
+    if (!req.user!.permissions.has('manage_settings') && !req.user!.permissions.has('manage_users')) {
+      return res.status(403).json({ error: 'Insufficient permissions to broadcast' });
+    }
+
+    const users = await query(`SELECT id FROM user_profiles WHERE is_active = true`);
+    
+    if (users.rows.length === 0) {
+      return res.json({ message: 'No active users to notify' });
+    }
+
+    // Insert for all users
+    const placeholders = users.rows.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`).join(', ');
+    const values = users.rows.flatMap(u => [u.id, type || 'announcement', title, message]);
+
+    await query(
+      `INSERT INTO notifications (user_id, type, title, message) VALUES ${placeholders}`,
+      values
+    );
+
+    res.status(201).json({ message: `Broadcast sent to ${users.rows.length} users` });
+  } catch (err: any) {
+    console.error(err); res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
 // PUT /api/notifications/:id
 router.put('/:id', authenticate, async (req: Request, res: Response) => {
   try {
@@ -65,6 +118,19 @@ router.post('/archive-all', authenticate, async (req: Request, res: Response) =>
       [req.user!.id]
     );
     res.json({ message: 'All archived' });
+  } catch (err: any) {
+    console.error(err); res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+// DELETE /api/notifications/archived-all
+router.delete('/archived-all', authenticate, async (req: Request, res: Response) => {
+  try {
+    await query(
+      `DELETE FROM notifications WHERE user_id = $1 AND is_archived = true`,
+      [req.user!.id]
+    );
+    res.json({ message: 'All archived notifications deleted' });
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
   }

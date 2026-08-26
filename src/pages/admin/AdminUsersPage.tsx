@@ -62,6 +62,7 @@ type SortDirection = 'asc' | 'desc';
 
 import AddUserModal from '../../components/AddUserModal';
 import BulkImportModal from '../../components/BulkImportModal';
+import BroadcastModal from '../../components/BroadcastModal';
 import UserDetailsModal from '../../components/UserDetailsModal';
 import DeleteUserModal from '../../components/DeleteUserModal';
 import EditUserPermissionsModal from '../../components/EditUserPermissionsModal';
@@ -75,6 +76,7 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState('all');
   const [showAddUserModal, setShowAddUserModal] = useState(false);
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+  const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
@@ -339,6 +341,13 @@ export default function AdminUsersPage() {
         </div>
         <div className="flex gap-3">
           <button
+            onClick={() => setShowBroadcastModal(true)}
+            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
+          >
+            <Upload className="w-5 h-5 hidden" /> {/* Placeholder to match spacing if needed, but let's use a different icon actually, we don't have one easily imported, so no icon is fine */}
+            Broadcast
+          </button>
+          <button
             onClick={() => setShowBulkImportModal(true)}
             className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
           >
@@ -580,6 +589,15 @@ export default function AdminUsersPage() {
           fetchUsers();
         }}
       />
+
+      {showBroadcastModal && (
+        <BroadcastModal
+          onClose={() => setShowBroadcastModal(false)}
+          onSuccess={(msg) => {
+            setMessage({ type: 'success', text: msg });
+          }}
+        />
+      )}
 
       {showDetailsModal && selectedUser && (
         <UserDetailsModal

@@ -17,6 +17,24 @@ router.get('/', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+// POST /api/notifications
+router.post('/', authenticate, async (req, res) => {
+    try {
+        const { user_id, type, title, message, related_entity_type, related_entity_id, action_url } = req.body;
+        // Only allow admins or people with specific permissions to create notifications for others
+        if (user_id && user_id !== req.user.id && !req.user.permissions.has('manage_settings')) {
+            return res.status(403).json({ error: 'Insufficient permissions' });
+        }
+        const targetUserId = user_id || req.user.id;
+        const result = await query(`INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id, action_url)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`, [targetUserId, type || 'info', title, message, related_entity_type || null, related_entity_id || null, action_url || null]);
+        res.status(201).json(result.rows[0]);
+    }
+    catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
 // PUT /api/notifications/:id
 router.put('/:id', authenticate, async (req, res) => {
     try {

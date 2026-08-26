@@ -78,13 +78,25 @@ router.get('/suggestions', authenticate, async (req: Request, res: Response) => 
   try {
     const type = req.query.type as string;
     const term = req.query.search_term as string || req.query.term as string || '';
-    const fnMap: Record<string, string> = {
-      skill: 'autocomplete_skills', software: 'autocomplete_software',
-      equipment: 'autocomplete_equipment', process: 'autocomplete_processes',
-    };
-    const fn = fnMap[type];
-    if (!fn) return res.status(400).json({ error: 'Invalid type' });
-    const result = await query(`SELECT * FROM ${fn}($1)`, [term]);
+    
+    let sql = '';
+    if (type === 'skill') {
+      sql = `SELECT DISTINCT skill_name AS suggestion FROM user_skills WHERE skill_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM skills WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else if (type === 'software') {
+      sql = `SELECT DISTINCT software_name AS suggestion FROM user_software WHERE software_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM software WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else if (type === 'equipment') {
+      sql = `SELECT DISTINCT equipment_name AS suggestion FROM user_equipment WHERE equipment_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM equipment_types WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else if (type === 'process') {
+      sql = `SELECT DISTINCT process_name AS suggestion FROM user_processes WHERE process_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM processes WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else {
+      return res.status(400).json({ error: 'Invalid type' });
+    }
+
+    const result = await query(sql, [`%${term}%`]);
     res.json(result.rows.map((r: any) => r.suggestion));
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -94,17 +106,27 @@ router.get('/suggestions', authenticate, async (req: Request, res: Response) => 
 // Autocomplete endpoints
 router.get('/autocomplete/:type', authenticate, async (req: Request, res: Response) => {
   try {
-    const fnMap: Record<string, string> = {
-      skill: 'autocomplete_skills',
-      software: 'autocomplete_software',
-      equipment: 'autocomplete_equipment',
-      process: 'autocomplete_processes',
-    };
-    const fn = fnMap[req.params.type];
-    if (!fn) return res.status(400).json({ error: 'Invalid type' });
-
+    const type = req.params.type as string;
     const term = req.query.term as string || '';
-    const result = await query(`SELECT * FROM ${fn}($1)`, [term]);
+
+    let sql = '';
+    if (type === 'skill') {
+      sql = `SELECT DISTINCT skill_name AS suggestion FROM user_skills WHERE skill_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM skills WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else if (type === 'software') {
+      sql = `SELECT DISTINCT software_name AS suggestion FROM user_software WHERE software_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM software WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else if (type === 'equipment') {
+      sql = `SELECT DISTINCT equipment_name AS suggestion FROM user_equipment WHERE equipment_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM equipment_types WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else if (type === 'process') {
+      sql = `SELECT DISTINCT process_name AS suggestion FROM user_processes WHERE process_name ILIKE $1 
+             UNION SELECT DISTINCT name AS suggestion FROM processes WHERE name ILIKE $1 ORDER BY suggestion LIMIT 10`;
+    } else {
+      return res.status(400).json({ error: 'Invalid type' });
+    }
+
+    const result = await query(sql, [`%${term}%`]);
     res.json(result.rows.map((r: any) => r.suggestion));
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });

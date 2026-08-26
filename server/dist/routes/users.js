@@ -118,7 +118,7 @@ router.delete('/:id', authenticate, requirePermission('manage_users'), async (re
     }
     catch (err) {
         console.error('Delete user error:', err);
-        res.status(500).json({ error: 'Internal Server Error', details: err.message });
+        res.status(500).json({ error: 'Internal Server Error' });
     }
 });
 export default router;

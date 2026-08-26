@@ -5,6 +5,7 @@ import { query } from '../config/database.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 import { sendTempPasswordEmail, generateTempPassword } from '../utils/email.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
+import { createNotification } from '../services/notificationService.js';
 const router = Router();
 function isValidPassword(password) {
     return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
@@ -19,54 +20,48 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
         }
         const generatedPassword = password || generateTempPassword();
         const hash = await bcrypt.hash(generatedPassword, 10);
-        const userRole = role || 'user';
-        const userResult = await query('INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email', [email, hash]);
-        const userId = userResult.rows[0].id;
+        const requestedRole = role || 'user';
+        // Resolve the role name from role_id when provided (the "Add User" UI sends role_id, not
+        // role) so the user_role column always reflects what was actually selected, rather than
+        // silently defaulting to 'user'.
         let resolvedRoleId = role_id;
-        if (!resolvedRoleId) {
-            const r = await query('SELECT id FROM roles WHERE LOWER(name) = $1', [userRole.toLowerCase()]);
+        let resolvedRoleName = requestedRole;
+        if (resolvedRoleId) {
+            const r = await query('SELECT name FROM roles WHERE id = $1', [resolvedRoleId]);
             if (r.rows.length === 0) {
-                return res.status(400).json({ error: `Invalid role: '${userRole}'. Role does not exist in the system.` });
+                return res.status(400).json({ error: 'Invalid role_id: role does not exist in the system.' });
+            }
+            resolvedRoleName = r.rows[0].name;
+        }
+        else {
+            const r = await query('SELECT id, name FROM roles WHERE LOWER(name) = $1', [requestedRole.toLowerCase()]);
+            if (r.rows.length === 0) {
+                return res.status(400).json({ error: `Invalid role: '${requestedRole}'. Role does not exist in the system.` });
             }
             resolvedRoleId = r.rows[0].id;
+            resolvedRoleName = r.rows[0].name;
         }
+        // Admin accounts cannot be created directly through this endpoint — only promoted to
+        // afterwards via Settings > Roles & Permissions, so account creation never defaults to
+        // (or is used to directly grant) the highest privilege tier.
+        if (resolvedRoleName.toLowerCase() === 'admin') {
+            return res.status(400).json({ error: 'Admin accounts cannot be created directly. Create the user first, then promote them to Admin from Settings.' });
+        }
+        const userResult = await query('INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email', [email, hash]);
+        const userId = userResult.rows[0].id;
         await query(`INSERT INTO user_profiles (id, full_name, email, user_role, role_id, require_password_change, temp_password_expires_at)
-       VALUES ($1, $2, $3, $4, $5, true, NOW() + INTERVAL '24 hours')`, [userId, full_name || 'New User', email, userRole, resolvedRoleId]);
+       VALUES ($1, $2, $3, $4, $5, true, NOW() + INTERVAL '24 hours')`, [userId, full_name || 'New User', email, resolvedRoleName.toLowerCase(), resolvedRoleId]);
+        // Account creation succeeds even if the welcome email can't be sent — the admin can share
+        // the returned credentials manually, and the user can always recover access via Forgot
+        // Password afterwards, so a mail-provider outage shouldn't block onboarding.
         const emailResult = await sendTempPasswordEmail(email, full_name || 'New User', generatedPassword);
-        if (!emailResult.success) {
-            // Rollback user creation if email fails
-            await query('DELETE FROM users WHERE id = $1', [userId]);
-            return res.status(500).json({ error: `Failed to send welcome email: ${emailResult.error}` });
-        }
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
         res.status(201).json({
             ...profileResult.rows[0],
             password: generatedPassword,
             email_sent: emailResult.success,
+            email_error: emailResult.success ? undefined : emailResult.error,
         });
-    }
-    catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Internal Server Error' });
-    }
-});
-// POST /api/admin/reset-password (SCL-01 temporary admin reset)
-router.post('/reset-password', authenticate, requirePermission('manage_users'), async (req, res) => {
-    try {
-        const { userId, newPassword: providedPassword } = req.body;
-        if (!userId)
-            return res.status(400).json({ error: 'userId is required' });
-        if (providedPassword && !isValidPassword(providedPassword)) {
-            return res.status(400).json({ error: 'Password must be at least 8 characters long and contain uppercase, lowercase, and numbers' });
-        }
-        const generatedPassword = providedPassword || generateTempPassword();
-        const hash = await bcrypt.hash(generatedPassword, 10);
-        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [hash, userId]);
-        const userRes = await query('SELECT email, full_name FROM user_profiles WHERE id = $1', [userId]);
-        const { email, full_name } = userRes.rows[0];
-        const emailResult = await sendTempPasswordEmail(email, full_name || 'User', generatedPassword);
-        await query(`UPDATE user_profiles SET require_password_change = true, temp_password_expires_at = NOW() + INTERVAL '24 hours' WHERE id = $1`, [userId]);
-        res.json({ message: 'Password reset successfully. User has been emailed.', email_sent: emailResult.success });
     }
     catch (err) {
         console.error(err);
@@ -80,16 +75,19 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
         const generatedPassword = password || generateTempPassword();
         const hash = await bcrypt.hash(generatedPassword, 10);
         const userRole = role || 'user';
+        if (userRole.toLowerCase() === 'admin') {
+            return res.status(400).json({ error: 'Admin accounts cannot be created via bulk import. Import the user first, then promote them to Admin from Settings.' });
+        }
         const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
         if (existingUser.rows.length > 0) {
             return res.status(409).json({ error: 'Email already exists' });
         }
         const userResult = await query('INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id', [email, hash]);
         const userId = userResult.rows[0].id;
-        const roleResult = await query('SELECT id FROM roles WHERE name = $1', [userRole]);
+        const roleResult = await query('SELECT id FROM roles WHERE LOWER(name) = $1', [userRole.toLowerCase()]);
         const roleId = roleResult.rows[0]?.id || null;
         const profileFields = {
-            id: userId, full_name: full_name || 'New User', email, user_role: userRole,
+            id: userId, full_name: full_name || 'New User', email, user_role: userRole.toLowerCase(),
             role_id: roleId, require_password_change: true, ...extraFields,
         };
         const rawKeys = Object.keys(profileFields);
@@ -101,16 +99,12 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
         placeholders.push(`NOW() + INTERVAL '24 hours'`);
         await query(`INSERT INTO user_profiles (${safeKeys.map(k => `"${k}"`).join(',')}) VALUES (${placeholders.join(',')})`, values);
         const emailResult = await sendTempPasswordEmail(email, full_name || 'New User', generatedPassword);
-        if (!emailResult.success) {
-            // Rollback
-            await query('DELETE FROM users WHERE id = $1', [userId]);
-            return res.status(500).json({ error: `Failed to send welcome email: ${emailResult.error}` });
-        }
         const profile = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
         res.status(201).json({
             ...profile.rows[0],
             password: generatedPassword,
             email_sent: emailResult.success,
+            email_error: emailResult.success ? undefined : emailResult.error,
         });
     }
     catch (err) {
@@ -165,15 +159,10 @@ router.put('/users/:id/permissions', authenticate, requirePermission('manage_rol
             }
             const rolePermsRes = await query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [targetRoleId]);
             const rolePermIds = rolePermsRes.rows.map(r => r.permission_id);
-            // Determine explicit denies (inherited but unchecked)
-            const deniedPerms = rolePermIds.filter(id => !pids.includes(id));
             // Determine explicit grants (checked but not inherited)
             const grantedPerms = pids.filter(id => !rolePermIds.includes(id));
-            for (const pid of deniedPerms) {
-                await query('INSERT INTO user_permissions (user_id, permission_id, granted_by, is_granted) VALUES ($1, $2, $3, false) ON CONFLICT DO NOTHING', [req.params.id, pid, req.user.id]);
-            }
             for (const pid of grantedPerms) {
-                await query('INSERT INTO user_permissions (user_id, permission_id, granted_by, is_granted) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING', [req.params.id, pid, req.user.id]);
+                await query('INSERT INTO user_permissions (user_id, permission_id, granted_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [req.params.id, pid, req.user.id]);
             }
         }
         await logAuditEvent({
@@ -257,6 +246,18 @@ router.put('/purchase-requests/:id/approve', authenticate, requirePermission('ap
        SET status = 'approved', approved_by = $1, approved_at = now(), rejection_reason = NULL
        WHERE id = $2
        RETURNING *`, [req.user.id, req.params.id]);
+        if (result.rows[0]) {
+            const pr = result.rows[0];
+            await createNotification({
+                userId: pr.requested_by,
+                type: 'procurement',
+                title: 'Purchase Request Approved',
+                message: `Your purchase request for ${pr.item_name || 'an item'} has been approved.`,
+                relatedEntityType: 'purchase_requests',
+                relatedEntityId: pr.id,
+                actionUrl: `/procurement/${pr.id}`
+            });
+        }
         res.json(result.rows[0]);
     }
     catch (err) {
@@ -270,6 +271,18 @@ router.put('/purchase-requests/:id/reject', authenticate, requirePermission('app
        SET status = 'rejected', approved_by = $1, approved_at = now(), rejection_reason = $2
        WHERE id = $3
        RETURNING *`, [req.user.id, req.body.rejection_reason || null, req.params.id]);
+        if (result.rows[0]) {
+            const pr = result.rows[0];
+            await createNotification({
+                userId: pr.requested_by,
+                type: 'procurement',
+                title: 'Purchase Request Rejected',
+                message: `Your purchase request for ${pr.item_name || 'an item'} was rejected.`,
+                relatedEntityType: 'purchase_requests',
+                relatedEntityId: pr.id,
+                actionUrl: `/procurement/${pr.id}`
+            });
+        }
         res.json(result.rows[0]);
     }
     catch (err) {
@@ -283,6 +296,18 @@ router.put('/purchase-requests/:id/status', authenticate, requirePermission('app
        SET status = $1, approved_by = $2, approved_at = CASE WHEN $1 = 'approved' THEN now() ELSE approved_at END
        WHERE id = $3
        RETURNING *`, [req.body.status, req.user.id, req.params.id]);
+        if (result.rows[0]) {
+            const pr = result.rows[0];
+            await createNotification({
+                userId: pr.requested_by,
+                type: 'procurement',
+                title: 'Purchase Request Status Updated',
+                message: `Your purchase request status was updated to ${req.body.status}.`,
+                relatedEntityType: 'purchase_requests',
+                relatedEntityId: pr.id,
+                actionUrl: `/procurement/${pr.id}`
+            });
+        }
         res.json(result.rows[0]);
     }
     catch (err) {
@@ -345,6 +370,18 @@ router.put('/leave-requests/:id/approve', authenticate, requirePermission('appro
        SET status = 'approved', approved_by = $1, approved_at = now(), admin_remarks = NULL
        WHERE id = $2
        RETURNING *`, [req.user.id, req.params.id]);
+        if (result.rows[0]) {
+            const lr = result.rows[0];
+            await createNotification({
+                userId: lr.requested_by,
+                type: 'leave',
+                title: 'Leave Request Approved',
+                message: `Your leave request has been approved.`,
+                relatedEntityType: 'leave_requests',
+                relatedEntityId: lr.id,
+                actionUrl: `/leaves`
+            });
+        }
         res.json(result.rows[0]);
     }
     catch (err) {
@@ -358,6 +395,18 @@ router.put('/leave-requests/:id/reject', authenticate, requirePermission('approv
        SET status = 'rejected', approved_by = $1, approved_at = now(), admin_remarks = $2
        WHERE id = $3
        RETURNING *`, [req.user.id, req.body.admin_remarks || null, req.params.id]);
+        if (result.rows[0]) {
+            const lr = result.rows[0];
+            await createNotification({
+                userId: lr.requested_by,
+                type: 'leave',
+                title: 'Leave Request Rejected',
+                message: `Your leave request was rejected.`,
+                relatedEntityType: 'leave_requests',
+                relatedEntityId: lr.id,
+                actionUrl: `/leaves`
+            });
+        }
         res.json(result.rows[0]);
     }
     catch (err) {
@@ -562,6 +611,18 @@ router.post('/work/:id/comments', authenticate, requirePermission('create_work')
         const result = await query(`INSERT INTO admin_comments (work_id, comment, commented_by)
        VALUES ($1,$2,$3)
        RETURNING *`, [req.params.id, comment, req.user.id]);
+        const workResult = await query('SELECT user_id, project_name FROM assigned_works WHERE id = $1', [req.params.id]);
+        if (workResult.rows[0] && workResult.rows[0].user_id !== req.user.id) {
+            await createNotification({
+                userId: workResult.rows[0].user_id,
+                type: 'work',
+                title: 'New Comment on Your Work',
+                message: `An admin commented on your work: ${workResult.rows[0].project_name}`,
+                relatedEntityType: 'assigned_works',
+                relatedEntityId: req.params.id,
+                actionUrl: `/work/${req.params.id}`
+            });
+        }
         res.status(201).json(result.rows[0]);
     }
     catch (err) {

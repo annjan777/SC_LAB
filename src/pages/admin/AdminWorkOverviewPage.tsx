@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Users, Clock, TrendingUp, AlertCircle, CheckCircle2, Eye, X, ShoppingCart, ChevronDown, ChevronUp, ClipboardList, Plus } from 'lucide-react';
+import { AlertTriangle, Users, Clock, TrendingUp, AlertCircle, CheckCircle2, Eye, X, ShoppingCart, ChevronDown, ChevronUp, ClipboardList, Plus, Edit2 } from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminWorkDetailModal from '../../components/AdminWorkDetailModal';
 import WorkEntryFormModal from '../../components/WorkEntryFormModal';
+import EditWorkEntryModal from '../../components/EditWorkEntryModal';
+import WorkEntryDetailModal from '../../components/WorkEntryDetailModal';
+import ProgressUpdateModal from '../../components/ProgressUpdateModal';
+import ProblemReportModal from '../../components/ProblemReportModal';
+import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
 
 interface WorkCycle {
   id: string;
@@ -51,7 +56,6 @@ export default function AdminWorkOverviewPage() {
   }, [profile, navigate]);
 
   const [activeCycle, setActiveCycle] = useState<WorkCycle | null>(null);
-  const [showCreateWorkModal, setShowCreateWorkModal] = useState(false);
   const [workData, setWorkData] = useState<UserWorkData[]>([]);
   const [myWorkSummary, setMyWorkSummary] = useState<{
     totalWorks: number;
@@ -76,12 +80,26 @@ export default function AdminWorkOverviewPage() {
     user: '',
   });
   const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null);
+  const [showCreateWorkModal, setShowCreateWorkModal] = useState(false);
   const [activeCardFilter, setActiveCardFilter] = useState<string | null>(null);
   const [showNoWorkModal, setShowNoWorkModal] = useState(false);
   const [showSupportRequestsModal, setShowSupportRequestsModal] = useState(false);
   const [usersWithoutWork, setUsersWithoutWork] = useState<any[]>([]);
   const [expandedUsers, setExpandedUsers] = useState<Set<string>>(new Set());
   const [expandAll, setExpandAll] = useState(false);
+  const [showEditWorkModal, setShowEditWorkModal] = useState(false);
+  const [workIdToEdit, setWorkIdToEdit] = useState<string | null>(null);
+
+  const [selectedUserWork, setSelectedUserWork] = useState<UserWorkData | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [showProblemModal, setShowProblemModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const hasEditPerm = hasPermission('edit_work');
+  const isWorkOwnerOrSupervisor = (work: UserWorkData) => work.user_id === user?.id || (work.assigned_by && work.assigned_by === profile?.full_name);
+  const canEditWork = (work: UserWorkData) => hasEditPerm || isWorkOwnerOrSupervisor(work);
 
   useEffect(() => {
     fetchData();
@@ -251,13 +269,6 @@ export default function AdminWorkOverviewPage() {
             </p>
           )}
         </div>
-          <button
-            onClick={() => setShowCreateWorkModal(true)}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-          >
-            <Plus className="h-5 w-5" />
-            Create New Work Entry
-          </button>
       </div>
 
 
@@ -674,14 +685,37 @@ export default function AdminWorkOverviewPage() {
                                 </div>
                               </td>
                               <td className="px-4 py-3">
-                                <button
-                                  onClick={() => setSelectedWorkId(work.work_id)}
-                                  className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors"
-                                  title="View details"
-                                >
-                                  <Eye className="h-4 w-4" />
-                                  <span>View</span>
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    onClick={() => {
+                                      if (isWorkOwnerOrSupervisor(work)) {
+                                        setSelectedUserWork(work);
+                                        setShowDetailModal(true);
+                                      } else {
+                                        setSelectedWorkId(work.work_id);
+                                      }
+                                    }}
+                                    className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors"
+                                    title="View details"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                    <span>View</span>
+                                  </button>
+                                  {canEditWork(work) && (
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setWorkIdToEdit(work.work_id);
+                                        setShowEditWorkModal(true);
+                                      }}
+                                      className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 transition-colors border-l pl-2 ml-1"
+                                      title="Edit"
+                                    >
+                                      <Edit2 className="h-4 w-4" />
+                                      <span>Edit</span>
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             </tr>
                           ))}
@@ -817,9 +851,80 @@ export default function AdminWorkOverviewPage() {
       {selectedWorkId && (
         <AdminWorkDetailModal
           workId={selectedWorkId}
-          onClose={() => setSelectedWorkId(null)}
-          onUpdate={fetchData}
+          isOpen={true}
+          onClose={() => {
+            setSelectedWorkId(null);
+            fetchData();
+          }}
         />
+      )}
+
+      {selectedUserWork && (
+        <>
+          <WorkEntryDetailModal
+            workId={selectedUserWork.work_id}
+            isOpen={showDetailModal}
+            onClose={() => {
+              setShowDetailModal(false);
+              setSelectedUserWork(null);
+              fetchData();
+            }}
+            onEdit={() => {
+              setShowDetailModal(false);
+              setWorkIdToEdit(selectedUserWork.work_id);
+              setShowEditWorkModal(true);
+            }}
+            onDelete={() => {
+              setShowDetailModal(false);
+              setShowDeleteModal(true);
+            }}
+            onUpdateProgress={() => {
+              setShowDetailModal(false);
+              setShowProgressModal(true);
+            }}
+            onReportProblem={() => {
+              setShowDetailModal(false);
+              setShowProblemModal(true);
+            }}
+            onRefresh={fetchData}
+          />
+          <DeleteConfirmationModal
+            isOpen={showDeleteModal}
+            onClose={() => { setShowDeleteModal(false); setSelectedUserWork(null); }}
+            onConfirm={async () => {
+              try {
+                setDeleteLoading(true);
+                await api.delete(`/api/work/${selectedUserWork.work_id}`);
+                setShowDeleteModal(false);
+                setSelectedUserWork(null);
+                fetchData();
+              } catch (error) {
+                console.error('Failed to delete work entry:', error);
+                alert('Failed to delete work entry');
+              } finally {
+                setDeleteLoading(false);
+              }
+            }}
+            title="Delete Work Entry"
+            message={`Are you sure you want to delete "${selectedUserWork.work_title}"? This will permanently remove the work entry and all associated milestones, progress updates, and problems.`}
+            loading={deleteLoading}
+          />
+          <ProgressUpdateModal
+            isOpen={showProgressModal}
+            onClose={() => { setShowProgressModal(false); setSelectedUserWork(null); }}
+            workId={selectedUserWork.work_id}
+            workTitle={selectedUserWork.work_title}
+            currentProgress={selectedUserWork.completion_percentage || 0}
+            onSuccess={fetchData}
+          />
+          <ProblemReportModal
+            isOpen={showProblemModal}
+            onClose={() => { setShowProblemModal(false); setSelectedUserWork(null); }}
+            workId={selectedUserWork.work_id}
+            workTitle={selectedUserWork.work_title}
+            onSuccess={fetchData}
+          />
+        </>
       )}
 
       <WorkEntryFormModal
@@ -830,6 +935,22 @@ export default function AdminWorkOverviewPage() {
           fetchData();
         }}
       />
+
+      {showEditWorkModal && workIdToEdit && (
+        <EditWorkEntryModal
+          isOpen={showEditWorkModal}
+          onClose={() => {
+            setShowEditWorkModal(false);
+            setWorkIdToEdit(null);
+          }}
+          workId={workIdToEdit}
+          onSuccess={() => {
+            setShowEditWorkModal(false);
+            setWorkIdToEdit(null);
+            fetchData();
+          }}
+        />
+      )}
     </div>
   );
 }

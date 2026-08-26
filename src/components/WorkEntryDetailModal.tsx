@@ -93,6 +93,8 @@ export default function WorkEntryDetailModal({
   const [progressUpdates, setProgressUpdates] = useState<ProgressUpdate[]>([]);
   const [problems, setProblems] = useState<Problem[]>([]);
   const [adminComments, setAdminComments] = useState<AdminComment[]>([]);
+  const [newComment, setNewComment] = useState('');
+  const [submittingComment, setSubmittingComment] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'milestones' | 'progress' | 'problems' | 'comments'>('overview');
 
   useEffect(() => {
@@ -144,6 +146,26 @@ export default function WorkEntryDetailModal({
       setError('Failed to load work details. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAddComment = async () => {
+    if (!newComment.trim()) return;
+
+    setSubmittingComment(true);
+    try {
+      const { error } = await api.post(`/api/work/${workId}/comments`, {
+        comment_text: newComment,
+      });
+
+      if (error) throw error;
+      setNewComment('');
+      await fetchWorkDetails();
+    } catch (err) {
+      console.error('Error adding comment:', err);
+      alert('Failed to add comment. Please try again.');
+    } finally {
+      setSubmittingComment(false);
     }
   };
 
@@ -577,25 +599,47 @@ export default function WorkEntryDetailModal({
                 <div className="space-y-4">
                   <h3 className="text-lg font-semibold text-gray-900 mb-4">Admin Comments</h3>
                   {adminComments.length === 0 ? (
-                    <div className="text-center py-12">
-                      <MessageSquare className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                      <p className="text-gray-500">No admin comments yet</p>
+                    <div className="text-center py-8 bg-gray-50 rounded-lg border border-gray-200">
+                      <MessageSquare className="h-8 w-8 text-gray-400 mx-auto mb-2" />
+                      <p className="text-gray-500">No comments yet</p>
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-4 max-h-[300px] overflow-y-auto pr-2">
                       {adminComments.map((comment) => (
                         <div key={comment.id} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                          <div className="flex items-start justify-between mb-2">
-                            <span className="font-medium text-gray-900">{comment.admin_profile.full_name}</span>
-                            <span className="text-sm text-gray-500">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="font-medium text-gray-900">{comment.admin_profile?.full_name || 'Admin'}</span>
+                            <span className="text-xs text-gray-500">
                               {new Date(comment.created_at).toLocaleDateString()}
                             </span>
                           </div>
-                          <p className="text-gray-700">{comment.comment_text}</p>
+                          <p className="text-gray-700 whitespace-pre-wrap">{comment.comment_text}</p>
                         </div>
                       ))}
                     </div>
                   )}
+
+                  <div className="mt-6 border-t border-gray-200 pt-6">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Add a Comment
+                    </label>
+                    <textarea
+                      value={newComment}
+                      onChange={(e) => setNewComment(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      rows={3}
+                      placeholder="Type your comment here..."
+                    />
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        onClick={handleAddComment}
+                        disabled={submittingComment || !newComment.trim()}
+                        className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {submittingComment ? 'Adding...' : 'Add Comment'}
+                      </button>
+                    </div>
+                  </div>
                 </div>
               )}
             </>

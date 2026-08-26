@@ -25,7 +25,9 @@ import { xssSanitizer } from './middleware/xssSanitizer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import fs from 'fs';
+import { query } from './config/database.js';
 const app = express();
+
 
 // Trust the first proxy (e.g. nginx or Docker bridge) to get the real client IP
 app.set('trust proxy', 1);
