@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { query } from '../config/database.js';
 import { authenticate } from '../middleware/auth.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
+import { sendBroadcastEmails } from '../utils/email.js';
 
 const router = Router();
 
@@ -49,26 +50,75 @@ router.post('/broadcast', authenticate, async (req: Request, res: Response) => {
   try {
     const { title, message, type } = req.body;
     
-    if (!req.user!.permissions.has('manage_settings') && !req.user!.permissions.has('manage_users')) {
+    if (
+      !req.user!.permissions.has('manage_settings') &&
+      !req.user!.permissions.has('manage_users') &&
+      req.user!.user_role !== 'admin' &&
+      req.user!.user_role !== 'super_admin'
+    ) {
       return res.status(403).json({ error: 'Insufficient permissions to broadcast' });
     }
 
-    const users = await query(`SELECT id FROM user_profiles WHERE is_active = true`);
+    if (!title?.trim() || !message?.trim()) {
+      return res.status(400).json({ error: 'Title and message are required' });
+    }
+
+    // 1. Fetch sender admin full name
+    const adminResult = await query(
+      `SELECT full_name FROM user_profiles WHERE id = $1`,
+      [req.user!.id]
+    );
+    const adminName = adminResult.rows[0]?.full_name || 'SC Lab Administrator';
+
+    // 2. Fetch all active users with their emails
+    const usersResult = await query(
+      `SELECT up.id, up.full_name, COALESCE(u.email, up.email) as email
+       FROM user_profiles up
+       JOIN users u ON u.id = up.id
+       WHERE up.is_active = true`
+    );
     
-    if (users.rows.length === 0) {
+    if (usersResult.rows.length === 0) {
       return res.json({ message: 'No active users to notify' });
     }
 
-    // Insert for all users
-    const placeholders = users.rows.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`).join(', ');
-    const values = users.rows.flatMap(u => [u.id, type || 'announcement', title, message]);
+    // 3. Format message to include admin name at the end
+    const formattedNotificationMessage = `${message.trim()}\n\n— Broadcasted by ${adminName}`;
+
+    // 4. Insert in-app notifications for all active users
+    const placeholders = usersResult.rows.map((_, i) => `($${i * 4 + 1}, $${i * 4 + 2}, $${i * 4 + 3}, $${i * 4 + 4})`).join(', ');
+    const values = usersResult.rows.flatMap(u => [u.id, type || 'announcement', title.trim(), formattedNotificationMessage]);
 
     await query(
       `INSERT INTO notifications (user_id, type, title, message) VALUES ${placeholders}`,
       values
     );
 
-    res.status(201).json({ message: `Broadcast sent to ${users.rows.length} users` });
+    // 5. Send broadcast emails to all users with admin name at the end
+    const emailRecipients = usersResult.rows
+      .filter((u: any) => u.email && u.email.trim().length > 0)
+      .map((u: any) => ({
+        id: u.id,
+        full_name: u.full_name,
+        email: u.email.trim(),
+      }));
+
+    if (emailRecipients.length > 0) {
+      sendBroadcastEmails({
+        recipients: emailRecipients,
+        title: title.trim(),
+        message: message.trim(),
+        adminName,
+      }).catch((err: any) => {
+        console.error('[BROADCAST EMAIL DISPATCH ERROR]', err.message);
+      });
+    }
+
+    res.status(201).json({ 
+      message: `Broadcast successfully delivered in-app to ${usersResult.rows.length} users and queued for email delivery to ${emailRecipients.length} recipients.`,
+      sent_by: adminName,
+      recipients_count: emailRecipients.length
+    });
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
   }

@@ -132,7 +132,7 @@ export default function AdvancedSearchFilters({ filters, onChange, defaultExpand
       </button>
 
       {activeCategory === category && (
-        <div className="absolute z-20 mt-2 w-80 bg-white border border-gray-300 rounded-lg shadow-lg">
+        <div className="absolute z-20 mt-2 w-72 sm:w-80 max-w-[calc(100vw-3rem)] left-0 bg-white border border-gray-300 rounded-lg shadow-lg">
           <div className="p-3 border-b border-gray-200">
             {filters[category].length > 0 && (
               <div className="flex justify-end mb-2">

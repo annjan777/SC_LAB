@@ -192,12 +192,12 @@ export default function AdminLeavesPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
             {hasPermission('approve_leaves') ? 'Leave Approvals' : 'Leave Requests'}
           </h1>
-          <p className="text-gray-600 mt-2">
+          <p className="text-sm sm:text-base text-gray-600 mt-1">
             {hasPermission('approve_leaves') ? 'Review and approve leave requests' : 'Submit and track your leave applications'}
           </p>
         </div>
@@ -218,7 +218,7 @@ export default function AdminLeavesPage() {
                 setShowForm(true);
               }
             }}
-            className="flex items-center space-x-2 px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
+            className="flex items-center justify-center space-x-2 px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition w-full sm:w-auto"
           >
             {showForm ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
             <span>{showForm ? 'Cancel' : 'New Request'}</span>

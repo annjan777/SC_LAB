@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { authApi } from '../lib/api';
 import { FlaskConical, Mail } from 'lucide-react';
+import { isProfileCompleted } from '../utils/userValidation';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -19,7 +20,10 @@ export default function LoginPage() {
   const location = useLocation();
 
   useEffect(() => {
-    if (location.state?.message) {
+    const params = new URLSearchParams(location.search);
+    if (params.get('session_expired') === 'true') {
+      setError('Your session has expired after 2 hours. Please sign in again.');
+    } else if (location.state?.message) {
       setSuccessMessage(location.state.message);
       setTimeout(() => setSuccessMessage(''), 5000);
     }
@@ -37,6 +41,8 @@ export default function LoginPage() {
       setLoading(false);
     } else if (result.profile?.require_password_change) {
       navigate('/change-password');
+    } else if (!isProfileCompleted(result.profile)) {
+      navigate('/complete-profile');
     } else {
       navigate('/dashboard');
     }

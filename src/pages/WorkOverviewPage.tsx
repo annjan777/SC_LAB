@@ -20,6 +20,8 @@ interface AssignedWork {
   id: string;
   project_name: string;
   assigned_by: string;
+  user_id?: string;
+  user_name?: string;
   work_title: string;
   description: string;
   start_date: string;
@@ -58,9 +60,9 @@ export default function WorkOverviewPage() {
   const { user, profile, hasPermission } = useAuth();
   const navigate = useNavigate();
 
-  // Redirect admins to team overview
+  // Redirect admins and super_admins to team overview
   useEffect(() => {
-    if (profile?.user_role === 'admin') {
+    if (profile?.user_role === 'admin' || profile?.user_role === 'super_admin') {
       navigate('/admin/work-overview', { replace: true });
     }
   }, [profile, navigate]);

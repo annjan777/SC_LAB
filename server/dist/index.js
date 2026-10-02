@@ -1,8 +1,14 @@
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
+import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+// Load server .env first, then root .env as fallback for shared variables like SMTP
+dotenv.config();
+dotenv.config({ path: path.resolve(__dirname, '../../.env') });
+dotenv.config({ path: path.resolve(__dirname, '../.env') });
+import express from 'express';
+import cors from 'cors';
 import multer from 'multer';
 import authRoutes from './routes/auth.js';
 import userRoutes from './routes/users.js';
@@ -20,7 +26,6 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { progressiveLoginLimiter } from './middleware/progressiveRateLimiter.js';
 import { xssSanitizer } from './middleware/xssSanitizer.js';
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import fs from 'fs';
 const app = express();
 // Trust the first proxy (e.g. nginx or Docker bridge) to get the real client IP
@@ -307,6 +312,7 @@ app.get('*', (req, res) => {
 import { initializeSuperAdmin } from './scripts/initAdmin.js';
 import { ensureOperationalSchema } from './scripts/ensureOperationalSchema.js';
 import { verifyEmailTransport } from './utils/email.js';
+import { startSkillReminderCron } from './services/skillReminderService.js';
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`SC Lab Server running on port ${PORT}`);
     await verifyEmailTransport().catch(err => {
@@ -314,4 +320,5 @@ app.listen(PORT, '0.0.0.0', async () => {
     });
     await ensureOperationalSchema();
     await initializeSuperAdmin();
+    startSkillReminderCron();
 });

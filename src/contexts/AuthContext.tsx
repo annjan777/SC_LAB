@@ -38,8 +38,32 @@ export interface UserProfile {
   require_password_change: boolean;
   last_password_changed_at: string | null;
   created_at: string;
-  updated_at: string;
   role_id: string | null;
+  is_profile_completed?: boolean;
+  designation?: string | null;
+  project_name?: string | null;
+  project_code?: string | null;
+  project_start_date?: string | null;
+  project_end_date?: string | null;
+  project_tenure?: string | null;
+  staff_contract_start_date?: string | null;
+  staff_contract_end_date?: string | null;
+  contract_tenure?: string | null;
+  project_role_responsibility?: string | null;
+  project_pi_coordinator?: string | null;
+  reporting_manager?: string | null;
+  current_status?: string | null;
+  contract_status?: string | null;
+  remarks_staff?: string | null;
+  last_skill_reminder_at?: string | null;
+  last_skill_popup_dismissed_at?: string | null;
+}
+
+export interface SkillReminderStatus {
+  hasSkills: boolean;
+  skillCount: number;
+  showPopup: boolean;
+  lastReminderAt?: string | null;
 }
 
 interface AuthContextType {
@@ -52,6 +76,9 @@ interface AuthContextType {
   signOut: () => Promise<void>;
   reloadProfile: () => Promise<void>;
   permissions: Set<string>;
+  skillStatus: SkillReminderStatus | null;
+  dismissSkillReminder: () => Promise<void>;
+  refreshSkillStatus: () => Promise<void>;
   hasPermission: (permission: PermissionName) => boolean;
   hasAnyPermission: (permissions: PermissionName[]) => boolean;
   hasAllPermissions: (permissions: PermissionName[]) => boolean;
@@ -64,23 +91,63 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [permissions, setPermissions] = useState<Set<string>>(new Set());
+  const [skillStatus, setSkillStatus] = useState<SkillReminderStatus | null>(null);
 
   useEffect(() => {
-    const token = getStoredToken();
-    if (token) {
+    const checkTokenValidity = () => {
+      const token = getStoredToken();
+      if (!token) return false;
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
-        if (payload.purpose === 'password_reset') {
-          setLoading(false);
-          return;
+        if (payload.purpose === 'password_reset') return true;
+
+        const nowSec = Math.floor(Date.now() / 1000);
+        // Check if token has expired (2-hour limit)
+        if (payload.exp && payload.exp < nowSec) {
+          console.warn('[AUTH] Token expired after 2 hours. Clearing session.');
+          return false;
         }
-      } catch (e) {
-        // ignore decode errors
+        return true;
+      } catch {
+        return false;
       }
-      loadSession();
+    };
+
+    const token = getStoredToken();
+    if (token) {
+      if (!checkTokenValidity()) {
+        signOut();
+        setLoading(false);
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login?session_expired=true';
+        }
+      } else {
+        loadSession();
+      }
     } else {
       setLoading(false);
     }
+
+    // Active session interval: automatically log out when 2 hours have passed
+    const intervalId = setInterval(() => {
+      const activeToken = getStoredToken();
+      if (activeToken && !checkTokenValidity()) {
+        console.warn('[AUTH] 2-hour active session expired. Logging out.');
+        signOut();
+        window.location.href = '/login?session_expired=true';
+      }
+    }, 20000);
+
+    const handleUnauthorized = () => {
+      signOut();
+      window.location.href = '/login?session_expired=true';
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+
+    return () => {
+      clearInterval(intervalId);
+      window.removeEventListener('auth:unauthorized', handleUnauthorized);
+    };
   }, []);
 
   const loadSession = async () => {
@@ -91,15 +158,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setProfile(null);
         setPermissions(new Set());
+        setSkillStatus(null);
       } else {
         setUser(data.user);
         setProfile(data.profile);
         setPermissions(new Set(data.permissions || []));
+        if (data.skillStatus) {
+          setSkillStatus(data.skillStatus);
+        }
       }
     } catch {
       setToken(null);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const refreshSkillStatus = async () => {
+    try {
+      const { data } = await api.get('/api/users/skill-reminder/status');
+      if (data) {
+        setSkillStatus(data);
+      }
+    } catch {
+      // Ignore background refresh errors
+    }
+  };
+
+  const dismissSkillReminder = async () => {
+    try {
+      await api.post('/api/users/skill-reminder/dismiss');
+      setSkillStatus(prev => prev ? { ...prev, showPopup: false } : null);
+    } catch {
+      setSkillStatus(prev => prev ? { ...prev, showPopup: false } : null);
     }
   };
 
@@ -112,6 +203,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.user);
       setProfile(data.profile);
       setPermissions(new Set(data.permissions || []));
+      if (data.skillStatus) {
+        setSkillStatus(data.skillStatus);
+      }
       return { error: null, profile: data.profile };
     } catch (error) {
       return { error: error as Error, profile: null };
@@ -137,6 +231,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUser(null);
     setProfile(null);
     setPermissions(new Set());
+    setSkillStatus(null);
   };
 
   const reloadProfile = async () => {
@@ -161,7 +256,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     <AuthContext.Provider value={{
       user, profile, session: null, loading,
       signIn, signUp, signOut, reloadProfile,
-      permissions, hasPermission, hasAnyPermission, hasAllPermissions,
+      permissions, skillStatus, dismissSkillReminder, refreshSkillStatus,
+      hasPermission, hasAnyPermission, hasAllPermissions,
     }}>
       {children}
     </AuthContext.Provider>

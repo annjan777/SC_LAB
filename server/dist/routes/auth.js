@@ -7,11 +7,36 @@ import { sendPasswordResetLinkEmail, sendTempPasswordEmail } from '../utils/emai
 import { validateBody } from '../middleware/validateRequest.js';
 import { loginSchema, changePasswordSchema, forgotPasswordSchema } from '../validators/authValidator.js';
 import { recordFailedLogin, resetFailedLogin } from '../middleware/progressiveRateLimiter.js';
+import { checkUserNeedsSkillReminder } from '../services/skillReminderService.js';
 function isValidPassword(password) {
     return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
 }
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 const router = Router();
+async function ensureProfileCompletionAccurate(profile) {
+    if (!profile)
+        return profile;
+    // Check if mandatory data actually exists
+    const hasData = Boolean(profile.full_name &&
+        profile.full_name !== 'New User' &&
+        (profile.designation || profile.program_designation) &&
+        profile.project_name &&
+        profile.project_code &&
+        profile.project_start_date &&
+        profile.project_end_date &&
+        profile.staff_contract_start_date &&
+        profile.staff_contract_end_date);
+    // If profile was marked completed but data does not exist, correct it in DB and memory
+    if (profile.is_profile_completed && !hasData) {
+        profile.is_profile_completed = false;
+        await query('UPDATE user_profiles SET is_profile_completed = false, updated_at = now() WHERE id = $1', [profile.id]);
+    }
+    else if (!profile.is_profile_completed && hasData) {
+        profile.is_profile_completed = true;
+        await query('UPDATE user_profiles SET is_profile_completed = true, updated_at = now() WHERE id = $1', [profile.id]);
+    }
+    return profile;
+}
 // POST /api/auth/login
 router.post('/login', validateBody(loginSchema), async (req, res) => {
     try {
@@ -30,7 +55,7 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
         // Login successful, reset the rate limit tracker for this IP
         resetFailedLogin(req.ip || req.socket.remoteAddress || 'unknown');
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [user.id]);
-        const profile = profileResult.rows[0] || null;
+        const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
         if (profile?.require_password_change) {
             if (profile.temp_password_expires_at && new Date(profile.temp_password_expires_at) < new Date()) {
                 return res.status(403).json({ error: 'Temporary password expired. Please contact an administrator.' });
@@ -48,11 +73,13 @@ router.post('/login', validateBody(loginSchema), async (req, res) => {
         const permResult = await query('SELECT * FROM get_user_permissions($1)', [user.id]);
         const permissions = permResult.rows.map((r) => r.permission_name);
         const token = generateToken(user.id, user.email);
+        const skillStatus = await checkUserNeedsSkillReminder(user.id);
         res.json({
             token,
             user: { id: user.id, email: user.email },
             profile,
             permissions,
+            skillStatus,
         });
     }
     catch (err) {
@@ -82,7 +109,18 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
         const hash = await bcrypt.hash(password, 10);
         await query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hash, req.user.id]);
         await query('UPDATE user_profiles SET last_password_changed_at = now(), require_password_change = false WHERE id = $1', [req.user.id]);
-        res.json({ message: 'Password changed successfully' });
+        const userRow = await query('SELECT id, email FROM users WHERE id = $1', [req.user.id]);
+        const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [req.user.id]);
+        const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
+        const permResult = await query('SELECT * FROM get_user_permissions($1)', [req.user.id]);
+        const token = generateToken(req.user.id, userRow.rows[0]?.email || req.user.email);
+        res.json({
+            message: 'Password changed successfully',
+            token,
+            user: { id: req.user.id, email: userRow.rows[0]?.email || req.user.email },
+            profile,
+            permissions: permResult.rows.map((r) => r.permission_name),
+        });
     }
     catch (err) {
         console.error('Change password error:', err);
@@ -93,11 +131,14 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
 router.get('/me', authenticate, async (req, res) => {
     try {
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [req.user.id]);
+        const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
         const permResult = await query('SELECT * FROM get_user_permissions($1)', [req.user.id]);
+        const skillStatus = await checkUserNeedsSkillReminder(req.user.id);
         res.json({
             user: { id: req.user.id, email: req.user.email },
-            profile: profileResult.rows[0] || null,
+            profile,
             permissions: permResult.rows.map((r) => r.permission_name),
+            skillStatus,
         });
     }
     catch (err) {
@@ -126,13 +167,14 @@ router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, 
         const randomPassword = crypto.randomBytes(32).toString('hex');
         const randomHash = await bcrypt.hash(randomPassword, 10);
         await query('UPDATE users SET password_hash = $1 WHERE id = $2', [randomHash, user.id]);
-        const sendResult = await sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl);
-        if (!sendResult.success) {
-            console.log(`\n======================================================`);
-            console.log(`[DEV MODE PASSWORD RESET LINK FOR ${user.email}]:`);
-            console.log(`   ${resetUrl}`);
-            console.log(`======================================================\n`);
-        }
+        sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl).then(sendResult => {
+            if (!sendResult.success) {
+                console.log(`\n======================================================`);
+                console.log(`[DEV MODE PASSWORD RESET LINK FOR ${user.email}]:`);
+                console.log(`   ${resetUrl}`);
+                console.log(`======================================================\n`);
+            }
+        }).catch(err => console.error('Background email error:', err));
         res.json({ message: 'A password reset link has been sent to your email.' });
     }
     catch (err) {
@@ -173,16 +215,15 @@ router.post('/admin-reset-password', authenticate, async (req, res) => {
        WHERE id = $1`, [userId]);
         // Fetch user info for email
         const userInfo = await query('SELECT up.full_name, u.email FROM user_profiles up JOIN users u ON u.id = up.id WHERE up.id = $1', [userId]);
-        let emailSent = false;
         if (userInfo.rows.length > 0) {
             const { full_name, email } = userInfo.rows[0];
-            const result = await sendTempPasswordEmail(email, full_name, password);
-            emailSent = result.success;
-            if (!result.success) {
-                console.log(`[DEV MODE] Password for ${email} reset to: ${password}`);
-            }
+            sendTempPasswordEmail(email, full_name, password).then(result => {
+                if (!result.success) {
+                    console.log(`[DEV MODE] Password for ${email} reset to: ${password}`);
+                }
+            }).catch(err => console.error('Background email error:', err));
         }
-        res.json({ message: 'Password reset successfully', password, email_sent: emailSent });
+        res.json({ message: 'Password reset successfully', password, email_sent: true });
     }
     catch (err) {
         console.error('Admin reset password error:', err);

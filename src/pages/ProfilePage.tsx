@@ -1,8 +1,10 @@
 import { useEffect, useState, FormEvent } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { api, authApi } from '../lib/api';
-import { Save, Plus, X, User, Briefcase, Phone, Award, Lock, Eye, EyeOff, Code, Box, Cpu } from 'lucide-react';
+import { Save, Plus, X, User, Briefcase, Phone, Award, Lock, Eye, EyeOff, Code, Box, Cpu, Clock } from 'lucide-react';
 import AutocompleteInput from '../components/AutocompleteInput';
+import { calculateTenure } from '../utils/tenureUtils';
 
 interface UserSkill {
   id: string;
@@ -29,10 +31,12 @@ interface UserProcess {
 }
 
 export default function ProfilePage() {
-  const { profile, reloadProfile } = useAuth();
+  const { profile, reloadProfile, refreshSkillStatus } = useAuth();
+  const location = useLocation();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [highlightSkills, setHighlightSkills] = useState(false);
 
   const [formData, setFormData] = useState({
     full_name: '',
@@ -47,7 +51,22 @@ export default function ProfilePage() {
     emergency_contact_phone: '',
     department: '',
     program_designation: '',
+    designation: '',
     supervisor: '',
+    reporting_manager: '',
+    project_name: '',
+    project_code: '',
+    project_start_date: '',
+    project_end_date: '',
+    project_tenure: '',
+    staff_contract_start_date: '',
+    staff_contract_end_date: '',
+    contract_tenure: '',
+    project_role_responsibility: '',
+    project_pi_coordinator: '',
+    current_status: 'Active',
+    contract_status: 'Active',
+    remarks_staff: '',
     joining_date: '',
     tenure_ending_date: '',
   });
@@ -90,8 +109,23 @@ export default function ProfilePage() {
         emergency_contact_name: profile.emergency_contact_name || '',
         emergency_contact_phone: profile.emergency_contact_phone || '',
         department: profile.department || '',
-        program_designation: profile.program_designation || '',
-        supervisor: profile.supervisor || '',
+        program_designation: profile.program_designation || profile.designation || '',
+        designation: profile.designation || profile.program_designation || '',
+        supervisor: profile.supervisor || profile.reporting_manager || '',
+        reporting_manager: profile.reporting_manager || profile.supervisor || '',
+        project_name: profile.project_name || '',
+        project_code: profile.project_code || '',
+        project_start_date: profile.project_start_date ? profile.project_start_date.split('T')[0] : '',
+        project_end_date: profile.project_end_date ? profile.project_end_date.split('T')[0] : '',
+        project_tenure: profile.project_tenure || '',
+        staff_contract_start_date: profile.staff_contract_start_date ? profile.staff_contract_start_date.split('T')[0] : '',
+        staff_contract_end_date: profile.staff_contract_end_date ? profile.staff_contract_end_date.split('T')[0] : '',
+        contract_tenure: profile.contract_tenure || '',
+        project_role_responsibility: profile.project_role_responsibility || '',
+        project_pi_coordinator: profile.project_pi_coordinator || '',
+        current_status: profile.current_status || 'Active',
+        contract_status: profile.contract_status || 'Active',
+        remarks_staff: profile.remarks_staff || '',
         joining_date: profile.joining_date || '',
         tenure_ending_date: profile.tenure_ending_date || '',
       });
@@ -122,6 +156,24 @@ export default function ProfilePage() {
     if (data) setUserProcesses(data);
   };
 
+  const handleProfileProjectDateChange = (field: 'project_start_date' | 'project_end_date', value: string) => {
+    const updated = { ...formData, [field]: value };
+    const calculated = calculateTenure(updated.project_start_date, updated.project_end_date);
+    if (calculated) {
+      updated.project_tenure = calculated;
+    }
+    setFormData(updated);
+  };
+
+  const handleProfileContractDateChange = (field: 'staff_contract_start_date' | 'staff_contract_end_date', value: string) => {
+    const updated = { ...formData, [field]: value };
+    const calculated = calculateTenure(updated.staff_contract_start_date, updated.staff_contract_end_date);
+    if (calculated) {
+      updated.contract_tenure = calculated;
+    }
+    setFormData(updated);
+  };
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -141,8 +193,23 @@ export default function ProfilePage() {
         emergency_contact_name: formData.emergency_contact_name || null,
         emergency_contact_phone: formData.emergency_contact_phone || null,
         department: formData.department || null,
-        program_designation: formData.program_designation || null,
-        supervisor: formData.supervisor || null,
+        program_designation: formData.designation || formData.program_designation || null,
+        designation: formData.designation || formData.program_designation || null,
+        supervisor: formData.reporting_manager || formData.supervisor || null,
+        reporting_manager: formData.reporting_manager || formData.supervisor || null,
+        project_name: formData.project_name || null,
+        project_code: formData.project_code || null,
+        project_start_date: formData.project_start_date || null,
+        project_end_date: formData.project_end_date || null,
+        project_tenure: formData.project_tenure || null,
+        staff_contract_start_date: formData.staff_contract_start_date || null,
+        staff_contract_end_date: formData.staff_contract_end_date || null,
+        contract_tenure: formData.contract_tenure || null,
+        project_role_responsibility: formData.project_role_responsibility || null,
+        project_pi_coordinator: formData.project_pi_coordinator || null,
+        current_status: formData.current_status || 'Active',
+        contract_status: formData.contract_status || 'Active',
+        remarks_staff: formData.remarks_staff || null,
         gender: formData.gender || null,
         updated_at: new Date().toISOString(),
       };
@@ -161,6 +228,20 @@ export default function ProfilePage() {
     }
   };
 
+  useEffect(() => {
+    if (location.search.includes('focus=skills') || location.hash === '#skills') {
+      const timer = setTimeout(() => {
+        const el = document.getElementById('skills-section');
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setHighlightSkills(true);
+          setTimeout(() => setHighlightSkills(false), 3500);
+        }
+      }, 250);
+      return () => clearTimeout(timer);
+    }
+  }, [location.search, location.hash]);
+
   const addSkill = async () => {
     if (!selectedSkill.trim()) return;
 
@@ -176,6 +257,7 @@ export default function ProfilePage() {
       setSelectedSkill('');
       setProficiencyLevel('intermediate');
       fetchUserSkills();
+      refreshSkillStatus();
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
     }
@@ -186,6 +268,7 @@ export default function ProfilePage() {
       const { error } = await api.delete('/api/expertise/skills/' + skillId);
       if (error) throw error;
       fetchUserSkills();
+      refreshSkillStatus();
     } catch (error: any) {
       setMessage({ type: 'error', text: error.message });
     }
@@ -533,6 +616,181 @@ export default function ProfilePage() {
               </div>
             </div>
 
+            <div className="border-t border-gray-200 pt-6">
+              <div className="flex items-center space-x-2 mb-4">
+                <Briefcase className="w-5 h-5 text-indigo-600" />
+                <h3 className="text-lg font-semibold text-gray-900">Project & Staff Contract Details</h3>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project Name</label>
+                  <input
+                    type="text"
+                    value={formData.project_name}
+                    onChange={(e) => setFormData({ ...formData, project_name: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Project Name"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project Code</label>
+                  <input
+                    type="text"
+                    value={formData.project_code}
+                    onChange={(e) => setFormData({ ...formData, project_code: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Project Code"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project Start Date</label>
+                  <input
+                    type="date"
+                    value={formData.project_start_date}
+                    onChange={(e) => handleProfileProjectDateChange('project_start_date', e.target.value)}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project End Date</label>
+                  <input
+                    type="date"
+                    value={formData.project_end_date}
+                    onChange={(e) => handleProfileProjectDateChange('project_end_date', e.target.value)}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Project Tenure
+                    <span className="text-xs text-gray-500 ml-2 font-normal">(Auto-calculated)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.project_tenure}
+                    onChange={(e) => setFormData({ ...formData, project_tenure: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="e.g. 1 Year 6 Months"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project PI / Coordinator</label>
+                  <input
+                    type="text"
+                    value={formData.project_pi_coordinator}
+                    onChange={(e) => setFormData({ ...formData, project_pi_coordinator: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="PI / Coordinator"
+                  />
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Project Role / Responsibility</label>
+                  <input
+                    type="text"
+                    value={formData.project_role_responsibility}
+                    onChange={(e) => setFormData({ ...formData, project_role_responsibility: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Role or responsibilities in project"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Staff Contract Start Date</label>
+                  <input
+                    type="date"
+                    value={formData.staff_contract_start_date}
+                    onChange={(e) => handleProfileContractDateChange('staff_contract_start_date', e.target.value)}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Staff Contract End Date</label>
+                  <input
+                    type="date"
+                    value={formData.staff_contract_end_date}
+                    onChange={(e) => handleProfileContractDateChange('staff_contract_end_date', e.target.value)}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Contract Tenure
+                    <span className="text-xs text-gray-500 ml-2 font-normal">(Auto-calculated)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.contract_tenure}
+                    onChange={(e) => setFormData({ ...formData, contract_tenure: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="e.g. 1 Year"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Reporting Manager</label>
+                  <input
+                    type="text"
+                    value={formData.reporting_manager}
+                    onChange={(e) => setFormData({ ...formData, reporting_manager: e.target.value, supervisor: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Reporting Manager"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Current Status</label>
+                  <select
+                    value={formData.current_status}
+                    onChange={(e) => setFormData({ ...formData, current_status: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="On Leave">On Leave</option>
+                    <option value="Resigned">Resigned</option>
+                    <option value="Relieved">Relieved</option>
+                    <option value="Completed">Completed</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Contract Status</label>
+                  <select
+                    value={formData.contract_status}
+                    onChange={(e) => setFormData({ ...formData, contract_status: e.target.value })}
+                    className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Under Review">Under Review</option>
+                    <option value="Renewed">Renewed</option>
+                    <option value="Expired">Expired</option>
+                    <option value="Terminated">Terminated</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div className="md:col-span-2">
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Remarks (Staff)</label>
+                  <textarea
+                    rows={3}
+                    value={formData.remarks_staff}
+                    onChange={(e) => setFormData({ ...formData, remarks_staff: e.target.value })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    placeholder="Staff remarks or notes..."
+                  />
+                </div>
+              </div>
+            </div>
+
             <div className="flex justify-end">
               <button
                 type="submit"
@@ -546,7 +804,14 @@ export default function ProfilePage() {
           </form>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div
+          id="skills-section"
+          className={`bg-white rounded-xl shadow-sm border transition-all duration-500 p-6 ${
+            highlightSkills
+              ? 'border-blue-500 ring-4 ring-blue-100 shadow-xl scale-[1.01]'
+              : 'border-gray-200'
+          }`}
+        >
           <div className="flex items-center space-x-2 mb-6">
             <Award className="w-5 h-5 text-blue-600" />
             <h2 className="text-xl font-bold text-gray-900">Skills & Expertise</h2>

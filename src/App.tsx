@@ -17,15 +17,17 @@ import RepositoryPage from './pages/RepositoryPage';
 import UsersPage from './pages/UsersPage';
 
 import AdminUsersPage from './pages/admin/AdminUsersPage';
+import CompleteProfilePage from './pages/CompleteProfilePage';
 import AdminProcurementPage from './pages/admin/AdminProcurementPage';
 import AdminLeavesPage from './pages/admin/AdminLeavesPage';
 import AdminReportsPage from './pages/admin/AdminReportsPage';
 import AdminSettingsPage from './pages/admin/AdminSettingsPage';
 import AdminWorkOverviewPage from './pages/admin/AdminWorkOverviewPage';
 import AdminRepositoryPage from './pages/admin/AdminRepositoryPage';
+import { isProfileCompleted } from './utils/userValidation';
 
 function HomeRedirect() {
-  const { user, loading } = useAuth();
+  const { user, profile, loading } = useAuth();
 
   if (loading) {
     return (
@@ -38,7 +40,10 @@ function HomeRedirect() {
     );
   }
 
-  return user ? <Navigate to="/dashboard" replace /> : <Navigate to="/login" replace />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (profile?.require_password_change) return <Navigate to="/change-password" replace />;
+  if (!isProfileCompleted(profile)) return <Navigate to="/complete-profile" replace />;
+  return <Navigate to="/dashboard" replace />;
 }
 
 function App() {
@@ -54,6 +59,14 @@ function App() {
             element={
               <ProtectedRoute>
                 <ChangePasswordPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/complete-profile"
+            element={
+              <ProtectedRoute>
+                <CompleteProfilePage />
               </ProtectedRoute>
             }
           />

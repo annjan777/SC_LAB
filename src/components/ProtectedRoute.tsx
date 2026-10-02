@@ -1,6 +1,7 @@
 import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { PermissionName } from '../lib/types';
+import { isProfileCompleted } from '../utils/userValidation';
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -33,6 +34,16 @@ export default function ProtectedRoute({
 
   if (profile?.require_password_change && location.pathname !== '/change-password') {
     return <Navigate to="/change-password" replace />;
+  }
+
+  const profileComplete = isProfileCompleted(profile);
+
+  if (!profileComplete && location.pathname !== '/complete-profile' && location.pathname !== '/change-password') {
+    return <Navigate to="/complete-profile" replace />;
+  }
+
+  if (profileComplete && location.pathname === '/complete-profile') {
+    return <Navigate to="/dashboard" replace />;
   }
 
   if (requiredPermissions && requiredPermissions.length > 0) {

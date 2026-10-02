@@ -43,6 +43,38 @@ export async function ensureOperationalSchema(): Promise<void> {
 
   // Keep existing databases compatible with the current UI behavior.
   await query(`
+    ALTER TABLE user_profiles
+    ADD COLUMN IF NOT EXISTS is_profile_completed boolean DEFAULT false,
+    ADD COLUMN IF NOT EXISTS designation text,
+    ADD COLUMN IF NOT EXISTS project_name text,
+    ADD COLUMN IF NOT EXISTS project_code text,
+    ADD COLUMN IF NOT EXISTS project_start_date date,
+    ADD COLUMN IF NOT EXISTS project_end_date date,
+    ADD COLUMN IF NOT EXISTS project_tenure text,
+    ADD COLUMN IF NOT EXISTS staff_contract_start_date date,
+    ADD COLUMN IF NOT EXISTS staff_contract_end_date date,
+    ADD COLUMN IF NOT EXISTS contract_tenure text,
+    ADD COLUMN IF NOT EXISTS project_role_responsibility text,
+    ADD COLUMN IF NOT EXISTS project_pi_coordinator text,
+    ADD COLUMN IF NOT EXISTS reporting_manager text,
+    ADD COLUMN IF NOT EXISTS current_status text,
+    ADD COLUMN IF NOT EXISTS contract_status text,
+    ADD COLUMN IF NOT EXISTS remarks_staff text,
+    ADD COLUMN IF NOT EXISTS remarks_manager text,
+    ADD COLUMN IF NOT EXISTS last_skill_reminder_at timestamp with time zone,
+    ADD COLUMN IF NOT EXISTS last_skill_popup_dismissed_at timestamp with time zone;
+
+    ALTER TABLE user_profiles ALTER COLUMN current_status DROP DEFAULT;
+    ALTER TABLE user_profiles ALTER COLUMN contract_status DROP DEFAULT;
+  `);
+
+  // Ensure any existing users prior to this change are not locked out
+  await query(`
+    UPDATE user_profiles
+    SET is_profile_completed = true
+    WHERE is_profile_completed IS NULL OR (is_profile_completed = false AND require_password_change = false);
+  `);
+  await query(`
     ALTER TABLE work_milestones
     ADD COLUMN IF NOT EXISTS expected_outcome text;
   `);

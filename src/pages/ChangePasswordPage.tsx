@@ -1,6 +1,6 @@
 import { useState, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { authApi, api } from '../lib/api';
+import { authApi, api, setToken } from '../lib/api';
 import { Lock, CheckCircle, X, Eye, EyeOff, LogOut } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -62,7 +62,7 @@ export default function ChangePasswordPage() {
       console.log('Starting password change for user:', userId);
 
       console.log('Step 1: Changing password via API...');
-      const { error: updateError } = await authApi.changePassword(
+      const { data: changeRes, error: updateError } = await authApi.changePassword(
         newPassword,
         isFirstTimeLogin ? undefined : currentPassword
       );
@@ -72,23 +72,22 @@ export default function ChangePasswordPage() {
         throw updateError;
       }
 
-      console.log('Step 2: Updating profile flag...');
-      await api.put('/api/users/' + userId, {
-        require_password_change: false,
-        last_password_changed_at: new Date().toISOString(),
-      });
+      if (changeRes?.token) {
+        setToken(changeRes.token);
+      }
 
-      console.log('Step 3: Password updated successfully!');
+      console.log('Step 2: Reloading updated profile...');
       await reloadProfile();
 
-      console.log('Step 4: Signing out and redirecting to login...');
-      await signOut();
-
-      await new Promise(resolve => setTimeout(resolve, 300));
-      const message = isFirstTimeLogin
-        ? 'Password set successfully! Please log in with your new password.'
-        : 'Password changed successfully. Please log in with your new password.';
-      navigate('/login', { state: { message } });
+      if (isFirstTimeLogin) {
+        console.log('Step 3: First-time login detected, redirecting to complete-profile...');
+        navigate('/complete-profile', { replace: true });
+      } else {
+        console.log('Step 3: Signing out and redirecting to login...');
+        await signOut();
+        await new Promise(resolve => setTimeout(resolve, 300));
+        navigate('/login', { state: { message: 'Password changed successfully. Please log in with your new password.' } });
+      }
     } catch (err: any) {
       console.error('Password change error:', err);
       setError(err.message || 'Failed to update password');

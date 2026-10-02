@@ -174,33 +174,33 @@ export default function DashboardPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">
+      <div className="mb-6 sm:mb-8">
+        <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
           Welcome back, {profile?.full_name?.split(' ')[0]}!
         </h1>
-        <p className="text-gray-600 mt-2">
+        <p className="text-sm sm:text-base text-gray-600 mt-1">
           {hasAnyPermission(['view_reports', 'manage_users']) ? 'Lab management overview and system statistics' : 'Your personalized lab portal overview'}
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mb-6 sm:mb-8">
         {cards.map((card, index) => {
           const Icon = card.icon;
           return (
             <button
               key={index}
               onClick={() => navigate(card.link)}
-              className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 text-left group"
+              className="bg-white rounded-xl shadow-sm border border-gray-200 p-3.5 sm:p-5 hover:shadow-lg transition-all duration-300 transform hover:-translate-y-1 text-left group"
             >
-              <div className="flex items-start justify-between mb-3">
-                <div className={`${card.color} p-3 rounded-lg group-hover:scale-110 transition-transform`}>
-                  <Icon className="w-5 h-5 text-white" />
+              <div className="flex items-start justify-between mb-2 sm:mb-3">
+                <div className={`${card.color} p-2 sm:p-3 rounded-lg group-hover:scale-110 transition-transform`}>
+                  <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-white" />
                 </div>
               </div>
-              <h3 className="text-gray-600 text-xs font-medium mb-1 uppercase tracking-wide">{card.title}</h3>
-              <p className="text-2xl font-bold text-gray-900 mb-1">{card.value}</p>
+              <h3 className="text-gray-600 text-xs font-medium mb-1 uppercase tracking-wide truncate">{card.title}</h3>
+              <p className="text-xl sm:text-2xl font-bold text-gray-900 mb-0.5 sm:mb-1">{card.value}</p>
               {card.description && (
-                <p className="text-xs text-gray-500">{card.description}</p>
+                <p className="text-xs text-gray-500 truncate">{card.description}</p>
               )}
             </button>
           );

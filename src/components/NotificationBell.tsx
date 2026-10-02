@@ -90,8 +90,10 @@ export default function NotificationBell() {
 
     if (notification.action_url) {
       navigate(notification.action_url);
-      setIsOpen(false);
+    } else {
+      navigate(`/notifications?highlight=${notification.id}`);
     }
+    setIsOpen(false);
   };
 
   const getTimeAgo = (timestamp: string) => {

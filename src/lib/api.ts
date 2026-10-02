@@ -49,6 +49,10 @@ async function request<T = any>(
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
+      if (res.status === 401 && path !== '/api/auth/login') {
+        setToken(null);
+        window.dispatchEvent(new Event('auth:unauthorized'));
+      }
       return { data: null, error: new Error(json?.error || `HTTP ${res.status}`) };
     }
 

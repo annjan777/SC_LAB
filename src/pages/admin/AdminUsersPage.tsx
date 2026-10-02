@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { api, authApi } from '../../lib/api';
-import { Search, Users, Eye, Trash2, UserPlus, Upload, Shield, ChevronUp, ChevronDown, Key } from 'lucide-react';
+import { Search, Users, Eye, Trash2, UserPlus, Upload, Shield, ChevronUp, ChevronDown, Key, Edit2, Send, Download } from 'lucide-react';
 
 interface UserProfile {
   id: string;
@@ -27,6 +27,23 @@ interface UserProfile {
   created_at: string;
   updated_at: string;
   role_id: string | null;
+  designation?: string | null;
+  project_name?: string | null;
+  project_code?: string | null;
+  project_start_date?: string | null;
+  project_end_date?: string | null;
+  project_tenure?: string | null;
+  staff_contract_start_date?: string | null;
+  staff_contract_end_date?: string | null;
+  contract_tenure?: string | null;
+  project_role_responsibility?: string | null;
+  project_pi_coordinator?: string | null;
+  reporting_manager?: string | null;
+  current_status?: string | null;
+  contract_status?: string | null;
+  remarks_staff?: string | null;
+  remarks_manager?: string | null;
+  is_profile_completed?: boolean;
   skills?: string[];
   software?: string[];
   equipment?: string[];
@@ -81,6 +98,7 @@ export default function AdminUsersPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showPermissionsModal, setShowPermissionsModal] = useState(false);
   const [showResetPasswordModal, setShowResetPasswordModal] = useState(false);
+  const [openDetailsInEditMode, setOpenDetailsInEditMode] = useState(false);
   const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
@@ -298,8 +316,9 @@ export default function AdminUsersPage() {
     }
   };
 
-  const handleViewUserDetails = async (user: UserProfile) => {
+  const handleViewUserDetails = async (user: UserProfile, editMode = false) => {
     setSelectedUser(user);
+    setOpenDetailsInEditMode(editMode);
 
     const [skillsData, softwareData, equipmentData, processesData] = await Promise.all([
       api.get('/api/expertise/skills', { user_id: user.id }),
@@ -324,6 +343,100 @@ export default function AdminUsersPage() {
       <ChevronDown className="w-4 h-4 inline ml-1" />;
   };
 
+  const exportUsersToCSV = () => {
+    // If filters are applied, filteredUsers contains the filtered subset.
+    // If no filters are applied, filteredUsers contains all users.
+    const usersToExport = filteredUsers;
+
+    if (usersToExport.length === 0) {
+      alert('No users match the current search or filters to export.');
+      return;
+    }
+
+    const headers = [
+      'S. No.',
+      'Full Name',
+      'Email',
+      'Phone',
+      'Designation',
+      'Project Name',
+      'Project Code',
+      'Project Start Date',
+      'Project End Date',
+      'Project Tenure',
+      'Staff Contract Start Date',
+      'Staff Contract End Date',
+      'Contract Tenure',
+      'Project Role / Responsibility',
+      'Project PI / Coordinator',
+      'Reporting Manager',
+      'Current Status',
+      'Contract Status',
+      'Remarks (Staff)',
+      'Remarks(Manager)',
+    ];
+
+    const formatDate = (val?: string | null) => {
+      if (!val) return '';
+      return val.split('T')[0];
+    };
+
+    const escapeCSV = (val?: string | number | null) => {
+      if (val === null || val === undefined) return '""';
+      const str = String(val).trim();
+      return `"${str.replace(/"/g, '""')}"`;
+    };
+
+    const rows = usersToExport.map((u, idx) => [
+      escapeCSV(idx + 1),
+      escapeCSV(u.full_name || ''),
+      escapeCSV(u.email || ''),
+      escapeCSV(u.phone || ''),
+      escapeCSV(u.designation || u.program_designation || ''),
+      escapeCSV(u.project_name || ''),
+      escapeCSV(u.project_code || ''),
+      escapeCSV(formatDate(u.project_start_date)),
+      escapeCSV(formatDate(u.project_end_date)),
+      escapeCSV(u.project_tenure || ''),
+      escapeCSV(formatDate(u.staff_contract_start_date)),
+      escapeCSV(formatDate(u.staff_contract_end_date)),
+      escapeCSV(u.contract_tenure || ''),
+      escapeCSV(u.project_role_responsibility || ''),
+      escapeCSV(u.project_pi_coordinator || ''),
+      escapeCSV(u.reporting_manager || u.supervisor || ''),
+      escapeCSV(u.current_status || (u.is_active ? 'Active' : 'Inactive')),
+      escapeCSV(u.contract_status || (u.is_active ? 'Active' : 'Inactive')),
+      escapeCSV(u.remarks_staff || ''),
+      escapeCSV(u.remarks_manager || ''),
+    ]);
+
+    const csvContent =
+      headers.map((h) => `"${h}"`).join(',') +
+      '\n' +
+      rows.map((row) => row.join(',')).join('\n') +
+      '\n';
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const isFiltered = usersToExport.length !== users.length;
+    const timestamp = new Date().toISOString().split('T')[0];
+    const filename = isFiltered
+      ? `sc_lab_users_filtered_${usersToExport.length}_${timestamp}.csv`
+      : `sc_lab_users_all_${timestamp}.csv`;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    setMessage({
+      type: 'success',
+      text: `Successfully exported ${usersToExport.length} user(s) to CSV${isFiltered ? ' (filtered results)' : ' (all members)'}.`,
+    });
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -334,32 +447,44 @@ export default function AdminUsersPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Manage Users</h1>
-          <p className="text-gray-600 mt-2">View and manage lab members</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Manage Users</h1>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">View and manage lab members</p>
         </div>
-        <div className="flex gap-3">
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <button
+            onClick={exportUsersToCSV}
+            title={
+              filteredUsers.length === users.length
+                ? `Export all ${users.length} users as CSV`
+                : `Export ${filteredUsers.length} filtered user(s) as CSV`
+            }
+            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
+          >
+            <Download className="w-4 h-4" />
+            <span>Export CSV</span>
+          </button>
           <button
             onClick={() => setShowBroadcastModal(true)}
-            className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
           >
-            <Upload className="w-5 h-5 hidden" /> {/* Placeholder to match spacing if needed, but let's use a different icon actually, we don't have one easily imported, so no icon is fine */}
-            Broadcast
+            <Send className="w-4 h-4" />
+            <span>Broadcast</span>
           </button>
           <button
             onClick={() => setShowBulkImportModal(true)}
-            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
           >
-            <Upload className="w-5 h-5" />
-            Bulk Import
+            <Upload className="w-4 h-4" />
+            <span>Bulk Import</span>
           </button>
           <button
             onClick={() => setShowAddUserModal(true)}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2"
+            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
           >
-            <UserPlus className="w-5 h-5" />
-            Add User
+            <UserPlus className="w-4 h-4" />
+            <span>Add User</span>
           </button>
         </div>
       </div>
@@ -376,7 +501,7 @@ export default function AdminUsersPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             <div className="md:col-span-2">
               <div className="relative">
@@ -523,12 +648,22 @@ export default function AdminUsersPage() {
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
-                            handleViewUserDetails(user);
+                            handleViewUserDetails(user, false);
                           }}
                           className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
                           title="View details"
                         >
                           <Eye className="w-5 h-5" />
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleViewUserDetails(user, true);
+                          }}
+                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
+                          title="Edit user details"
+                        >
+                          <Edit2 className="w-5 h-5" />
                         </button>
                         <button
                           onClick={(e) => {
@@ -606,7 +741,26 @@ export default function AdminUsersPage() {
           software={userSoftware}
           equipment={userEquipment}
           processes={userProcesses}
-          onClose={() => setShowDetailsModal(false)}
+          initialEditMode={openDetailsInEditMode}
+          onClose={() => {
+            setShowDetailsModal(false);
+            setOpenDetailsInEditMode(false);
+          }}
+          onUserUpdated={(updatedUser) => {
+            setUsers((prev) =>
+              prev.map((u) =>
+                u.id === updatedUser.id
+                  ? ({ ...u, ...updatedUser, user_role: updatedUser.user_role as 'admin' | 'user' })
+                  : u
+              )
+            );
+            setSelectedUser(updatedUser as any);
+            setMessage({
+              type: 'success',
+              text: `Updated ${updatedUser.full_name}'s details successfully!`,
+            });
+            setTimeout(() => setMessage(null), 5000);
+          }}
         />
       )}
 

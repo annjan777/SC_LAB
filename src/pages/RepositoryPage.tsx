@@ -156,17 +156,17 @@ export default function RepositoryPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">My Documents</h1>
-          <p className="text-gray-600 mt-2">Your personal document repository and shared files</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">My Documents</h1>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">Your personal document repository and shared files</p>
         </div>
         <button
           onClick={() => setShowUploadModal(true)}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-2 shadow-sm"
+          className="px-4 py-2 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto"
         >
           <Upload className="w-5 h-5" />
-          Upload Document
+          <span>Upload Document</span>
         </button>
       </div>
 

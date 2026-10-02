@@ -25,7 +25,7 @@ declare global {
 }
 
 export function generateToken(userId: string, email: string): string {
-  return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '7d' });
+  return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '2h' });
 }
 
 export function generatePasswordResetToken(userId: string, email: string): string {
@@ -84,7 +84,10 @@ export async function authenticate(req: Request, res: Response, next: NextFuncti
     };
 
     next();
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: 'Session expired after 2 hours. Please log in again.' });
+    }
     return res.status(401).json({ error: 'Invalid token' });
   }
 }

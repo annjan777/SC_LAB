@@ -5,7 +5,9 @@ import { authenticate } from '../middleware/auth.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
 const router = Router();
 function canManage(req, perm) {
-    return req.user.permissions.has(perm);
+    const isSuper = req.user?.user_role === 'super_admin' || req.user?.user_role === 'superadmin';
+    const isAdmin = req.user?.user_role === 'admin';
+    return isSuper || isAdmin || (req.user?.permissions.has(perm) ?? false);
 }
 async function loadWorkOwner(workId, reqUser) {
     const r = await query('SELECT user_id, assigned_by FROM assigned_works WHERE id = $1', [workId]);
@@ -108,15 +110,63 @@ router.post('/', authenticate, async (req, res) => {
             return res.status(403).json({ error: 'Insufficient permissions' });
         }
         const { user_id, project_name, assigned_by, work_title, description, start_date, end_date, priority, milestones = [], initial_status, initial_percentage, progress_notes, } = req.body;
-        if (!assigned_by) {
-            return res.status(400).json({ error: 'assigned_by is required' });
+        const currentUserId = req.user.id;
+        const currentUserRole = (req.user.user_role || '').toLowerCase();
+        const isSuperAdmin = currentUserRole === 'super_admin' || currentUserRole === 'superadmin';
+        const isAdmin = currentUserRole === 'admin';
+        let ownerId = currentUserId;
+        let finalAssignedBy = assigned_by;
+        // Check if work is being assigned to someone else
+        if (user_id && user_id !== currentUserId) {
+            const targetUserResult = await query('SELECT id, full_name, user_role FROM user_profiles WHERE id = $1', [user_id]);
+            if (targetUserResult.rows.length === 0) {
+                return res.status(404).json({ error: 'Assigned target user not found' });
+            }
+            const targetUser = targetUserResult.rows[0];
+            const targetRole = (targetUser.user_role || '').toLowerCase();
+            const targetIsSuperAdmin = targetRole === 'super_admin' || targetRole === 'superadmin';
+            const targetIsAdmin = targetRole === 'admin';
+            const targetIsUser = targetRole === 'user';
+            // Enforce role assignment rules:
+            // Super-Admin can assign work to ANYONE (Users, Admins, Super-Admins)
+            // Admin can assign work to -> Users and Admins
+            // Users can assign work to -> Users only
+            if (isSuperAdmin) {
+                // Super admin has full authority to assign work to any valid user
+            }
+            else if (isAdmin) {
+                if (!targetIsUser && !targetIsAdmin && !targetIsSuperAdmin) {
+                    return res.status(403).json({
+                        error: 'Admins can only assign work to Users and Admins.'
+                    });
+                }
+            }
+            else {
+                // Regular user
+                if (!targetIsUser) {
+                    return res.status(403).json({
+                        error: 'Users can only assign work to Users.'
+                    });
+                }
+            }
+            ownerId = user_id;
+            // If assigned_by is not explicitly provided, default to assigner's full name
+            if (!finalAssignedBy) {
+                const assignerProfile = await query('SELECT full_name FROM user_profiles WHERE id = $1', [currentUserId]);
+                finalAssignedBy = assignerProfile.rows[0]?.full_name || 'Supervisor';
+            }
         }
-        const ownerId = user_id || req.user.id;
+        else {
+            // Self work entry
+            if (!finalAssignedBy) {
+                return res.status(400).json({ error: 'assigned_by is required' });
+            }
+        }
         const createdWork = await transaction(async (client) => {
             const workResult = await client.query(`INSERT INTO assigned_works
            (user_id, project_name, assigned_by, work_title, description, start_date, end_date, priority)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-         RETURNING *`, [ownerId, project_name, assigned_by, work_title, description, start_date, end_date, priority || 'medium']);
+         RETURNING *`, [ownerId, project_name, finalAssignedBy, work_title, description, start_date, end_date, priority || 'medium']);
             const work = workResult.rows[0];
             for (const milestone of milestones) {
                 const title = milestone.milestone_description || milestone.title;
@@ -163,7 +213,12 @@ router.get('/:id', authenticate, async (req, res) => {
             return res.status(404).json({ error: 'Not found' });
         const row = work.rows[0];
         const isOwner = row.user_id === req.user.id;
-        if (!isOwner && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
+        let isAssigner = false;
+        if (!isOwner && row.assigned_by) {
+            const myProf = await query('SELECT full_name FROM user_profiles WHERE id = $1', [req.user.id]);
+            isAssigner = myProf.rows[0]?.full_name === row.assigned_by;
+        }
+        if (!isOwner && !isAssigner && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
             return res.status(403).json({ error: 'Insufficient permissions' });
         }
         res.json(mapWorkRow(row));

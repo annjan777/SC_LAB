@@ -5,7 +5,7 @@ if (process.env.NODE_ENV === 'production' && (!process.env.JWT_SECRET || process
 }
 const JWT_SECRET = process.env.JWT_SECRET || 'sc-lab-jwt-secret-change-in-production';
 export function generateToken(userId, email) {
-    return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '7d' });
+    return jwt.sign({ userId, email }, JWT_SECRET, { expiresIn: '2h' });
 }
 export function generatePasswordResetToken(userId, email) {
     return jwt.sign({ userId, email, purpose: 'password_reset' }, JWT_SECRET, { expiresIn: '1h' });
@@ -52,6 +52,9 @@ export async function authenticate(req, res, next) {
         next();
     }
     catch (err) {
+        if (err?.name === 'TokenExpiredError') {
+            return res.status(401).json({ error: 'Session expired after 2 hours. Please log in again.' });
+        }
         return res.status(401).json({ error: 'Invalid token' });
     }
 }

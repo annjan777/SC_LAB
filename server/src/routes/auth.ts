@@ -8,6 +8,7 @@ import { sendPasswordResetLinkEmail, sendTempPasswordEmail } from '../utils/emai
 import { validateBody } from '../middleware/validateRequest.js';
 import { loginSchema, signupSchema, changePasswordSchema, forgotPasswordSchema } from '../validators/authValidator.js';
 import { recordFailedLogin, resetFailedLogin } from '../middleware/progressiveRateLimiter.js';
+import { checkUserNeedsSkillReminder } from '../services/skillReminderService.js';
 
 function isValidPassword(password: string): boolean {
   return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
@@ -16,6 +17,34 @@ function isValidPassword(password: string): boolean {
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 
 const router = Router();
+
+async function ensureProfileCompletionAccurate(profile: any): Promise<any> {
+  if (!profile) return profile;
+
+  // Check if mandatory data actually exists
+  const hasData = Boolean(
+    profile.full_name &&
+    profile.full_name !== 'New User' &&
+    (profile.designation || profile.program_designation) &&
+    profile.project_name &&
+    profile.project_code &&
+    profile.project_start_date &&
+    profile.project_end_date &&
+    profile.staff_contract_start_date &&
+    profile.staff_contract_end_date
+  );
+
+  // If profile was marked completed but data does not exist, correct it in DB and memory
+  if (profile.is_profile_completed && !hasData) {
+    profile.is_profile_completed = false;
+    await query('UPDATE user_profiles SET is_profile_completed = false, updated_at = now() WHERE id = $1', [profile.id]);
+  } else if (!profile.is_profile_completed && hasData) {
+    profile.is_profile_completed = true;
+    await query('UPDATE user_profiles SET is_profile_completed = true, updated_at = now() WHERE id = $1', [profile.id]);
+  }
+
+  return profile;
+}
 
 // POST /api/auth/login
 router.post('/login', validateBody(loginSchema), async (req: Request, res: Response) => {
@@ -39,7 +68,7 @@ router.post('/login', validateBody(loginSchema), async (req: Request, res: Respo
     resetFailedLogin(req.ip || req.socket.remoteAddress || 'unknown');
 
     const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [user.id]);
-    const profile = profileResult.rows[0] || null;
+    const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
 
     if (profile?.require_password_change) {
       if (profile.temp_password_expires_at && new Date(profile.temp_password_expires_at) < new Date()) {
@@ -61,12 +90,14 @@ router.post('/login', validateBody(loginSchema), async (req: Request, res: Respo
     const permissions = permResult.rows.map((r: any) => r.permission_name);
 
     const token = generateToken(user.id, user.email);
+    const skillStatus = await checkUserNeedsSkillReminder(user.id);
 
     res.json({
       token,
       user: { id: user.id, email: user.email },
       profile,
       permissions,
+      skillStatus,
     });
   } catch (err: any) {
     console.error('Login error:', err);
@@ -103,7 +134,19 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
       [req.user!.id]
     );
 
-    res.json({ message: 'Password changed successfully' });
+    const userRow = await query('SELECT id, email FROM users WHERE id = $1', [req.user!.id]);
+    const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [req.user!.id]);
+    const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
+    const permResult = await query('SELECT * FROM get_user_permissions($1)', [req.user!.id]);
+    const token = generateToken(req.user!.id, userRow.rows[0]?.email || req.user!.email);
+
+    res.json({
+      message: 'Password changed successfully',
+      token,
+      user: { id: req.user!.id, email: userRow.rows[0]?.email || req.user!.email },
+      profile,
+      permissions: permResult.rows.map((r: any) => r.permission_name),
+    });
   } catch (err: any) {
     console.error('Change password error:', err);
     res.status(500).json({ error: 'Internal server error' });
@@ -114,12 +157,15 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
 router.get('/me', authenticate, async (req: Request, res: Response) => {
   try {
     const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [req.user!.id]);
+    const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
     const permResult = await query('SELECT * FROM get_user_permissions($1)', [req.user!.id]);
+    const skillStatus = await checkUserNeedsSkillReminder(req.user!.id);
 
     res.json({
       user: { id: req.user!.id, email: req.user!.email },
-      profile: profileResult.rows[0] || null,
+      profile,
       permissions: permResult.rows.map((r: any) => r.permission_name),
+      skillStatus,
     });
   } catch (err: any) {
     res.status(500).json({ error: 'Internal server error' });

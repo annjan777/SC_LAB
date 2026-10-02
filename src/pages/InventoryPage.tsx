@@ -233,18 +233,18 @@ export default function InventoryPage() {
 
   return (
     <div className="max-w-7xl mx-auto">
-      <div className="mb-8 flex items-center justify-between">
+      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Lab Inventory</h1>
-          <p className="text-gray-600 mt-2">Manage all equipment and consumables</p>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Lab Inventory</h1>
+          <p className="text-sm sm:text-base text-gray-600 mt-1">Manage all equipment and consumables</p>
         </div>
         {canCreateInventory && (
           <button
             onClick={handleAddNew}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 transition font-medium"
+            className="px-4 py-2 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center gap-2 transition font-medium w-full sm:w-auto"
           >
             <Plus className="h-5 w-5" />
-            Add Item
+            <span>Add Item</span>
           </button>
         )}
       </div>

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { X, Plus, Trash2 } from 'lucide-react';
+import { X, Plus, Trash2, User, UserCheck } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -15,12 +15,22 @@ interface Milestone {
   expected_outcome: string;
 }
 
+interface UserItem {
+  id: string;
+  full_name: string;
+  user_role?: string;
+  department?: string;
+  email?: string;
+}
+
 export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkEntryFormModalProps) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [users, setUsers] = useState<Array<{ id: string; full_name: string }>>([]);
+  const [users, setUsers] = useState<UserItem[]>([]);
   const [showCustomSupervisor, setShowCustomSupervisor] = useState(false);
+  const [assignmentMode, setAssignmentMode] = useState<'self' | 'assigned'>('self');
+  const [assignedToUserId, setAssignedToUserId] = useState('');
 
   const [formData, setFormData] = useState({
     project_name: '',
@@ -85,6 +95,29 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
     setMilestones(updated);
   };
 
+  const myRole = (profile?.user_role || '').toLowerCase();
+  const isSuperAdmin = myRole === 'super_admin' || myRole === 'superadmin';
+  const isAdmin = myRole === 'admin';
+
+  // Enforce role-based assignment options:
+  // Super-Admin can assign work to ANYONE (Users, Admins, Super-Admins)
+  // Admin can assign work to Users and Admins
+  // Users can assign work to Users only
+  const assignableUsers = users.filter((u) => {
+    const uRole = (u.user_role || '').toLowerCase();
+    const targetIsSuperAdmin = uRole === 'super_admin' || uRole === 'superadmin';
+    const targetIsAdmin = uRole === 'admin';
+    const targetIsUser = uRole === 'user';
+
+    if (isSuperAdmin) {
+      return true; // Super Admin has access to all team members
+    }
+    if (isAdmin) {
+      return targetIsUser || targetIsAdmin || targetIsSuperAdmin;
+    }
+    return targetIsUser;
+  });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
@@ -95,9 +128,15 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
         m => m.milestone_description && m.target_date && m.expected_outcome
       );
 
-      const assignedByValue = showCustomSupervisor
-        ? formData.custom_assigned_by
-        : formData.assigned_by;
+      if (assignmentMode === 'assigned' && !assignedToUserId) {
+        setError('Please select a team member to assign this work to.');
+        setLoading(false);
+        return;
+      }
+
+      const assignedByValue = assignmentMode === 'assigned'
+        ? (profile?.full_name || 'Supervisor')
+        : (showCustomSupervisor ? formData.custom_assigned_by : formData.assigned_by);
 
       if (!assignedByValue) {
         setError('Please select or enter who this work is assigned by.');
@@ -106,6 +145,7 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
       }
 
       const { error: workError } = await api.post('/api/work', {
+        user_id: assignmentMode === 'assigned' ? assignedToUserId : user?.id,
         project_name: formData.project_name || null,
         assigned_by: assignedByValue,
         work_title: formData.work_title || null,
@@ -146,6 +186,8 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
     });
     setMilestones([{ milestone_description: '', target_date: '', expected_outcome: '' }]);
     setShowCustomSupervisor(false);
+    setAssignmentMode('self');
+    setAssignedToUserId('');
     setError('');
   };
 
@@ -174,46 +216,130 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
               Section A: Assigned Work Details
             </h3>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Project Name
-                </label>
-                <input
-                  type="text"
-                  value={formData.project_name}
-                  onChange={(e) => setFormData({ ...formData, project_name: e.target.value })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Assigned By (Supervisor Name)
-                </label>
-                <select
-                  value={showCustomSupervisor ? 'others' : (users.find(u => u.full_name === formData.assigned_by)?.id || '')}
-                  onChange={(e) => handleAssignedByChange(e.target.value)}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            {/* Assignment Mode Switcher */}
+            <div className="mb-6 bg-slate-50 border border-slate-200 p-3 rounded-xl">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+                Work Entry Type
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setAssignmentMode('self')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
+                    assignmentMode === 'self'
+                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-700'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
                 >
-                  <option value="">Select Supervisor</option>
-                  {users.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      {user.full_name}
-                    </option>
-                  ))}
-                  <option value="others">Others</option>
-                </select>
-                {showCustomSupervisor && (
-                  <input
-                    type="text"
-                    value={formData.custom_assigned_by}
-                    onChange={(e) => setFormData({ ...formData, custom_assigned_by: e.target.value })}
-                    placeholder="Enter custom supervisor name"
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mt-2"
-                  />
-                )}
+                  <User className="w-4 h-4" />
+                  <span>Create for Myself</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAssignmentMode('assigned')}
+                  className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
+                    assignmentMode === 'assigned'
+                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-700'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <UserCheck className="w-4 h-4" />
+                  <span>Assign Work to User</span>
+                </button>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {assignmentMode === 'assigned' ? (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assign To <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      required
+                      value={assignedToUserId}
+                      onChange={(e) => setAssignedToUserId(e.target.value)}
+                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    >
+                      <option value="">Select Member</option>
+                      {assignableUsers.map((u) => {
+                        const roleTag = u.user_role === 'super_admin' ? 'Super Admin' : u.user_role === 'admin' ? 'Admin' : 'User';
+                        return (
+                          <option key={u.id} value={u.id}>
+                            {u.full_name} ({roleTag}{u.department ? ` - ${u.department}` : ''})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assigned By
+                    </label>
+                    <div className="flex items-center px-3 py-2 h-[42px] bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
+                      <span className="font-semibold text-blue-900">{profile?.full_name || 'You'}</span>
+                    </div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Project Name
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.project_name}
+                      onChange={(e) => setFormData({ ...formData, project_name: e.target.value })}
+                      placeholder="e.g. Smart Materials Laboratory"
+                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Project Name
+                    </label>
+                    <input
+                      type="text"
+                      value={formData.project_name}
+                      onChange={(e) => setFormData({ ...formData, project_name: e.target.value })}
+                      placeholder="e.g. Smart Materials Laboratory"
+                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Assigned By (Supervisor Name) <span className="text-red-500">*</span>
+                    </label>
+                    <select
+                      value={showCustomSupervisor ? 'others' : (users.find(u => u.full_name === formData.assigned_by)?.id || '')}
+                      onChange={(e) => handleAssignedByChange(e.target.value)}
+                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                    >
+                      <option value="">Select Supervisor</option>
+                      {users.map((user) => (
+                        <option key={user.id} value={user.id}>
+                          {user.full_name}
+                        </option>
+                      ))}
+                      <option value="others">Others</option>
+                    </select>
+                    {showCustomSupervisor && (
+                      <input
+                        type="text"
+                        value={formData.custom_assigned_by}
+                        onChange={(e) => setFormData({ ...formData, custom_assigned_by: e.target.value })}
+                        placeholder="Enter custom supervisor name"
+                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mt-2 text-sm"
+                      />
+                    )}
+                  </div>
+                </>
+              )}
 
               <div className="md:col-span-2">
                 <label className="block text-sm font-medium text-gray-700 mb-2">

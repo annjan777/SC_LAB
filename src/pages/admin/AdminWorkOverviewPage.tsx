@@ -49,8 +49,8 @@ export default function AdminWorkOverviewPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
-    // Only admin-role users should access Team Work Overview
-    if (profile !== null && profile?.user_role !== 'admin') {
+    // Only admin and super_admin users should access Team Work Overview
+    if (profile !== null && profile?.user_role !== 'admin' && profile?.user_role !== 'super_admin') {
       navigate('/work-overview', { replace: true });
     }
   }, [profile, navigate]);
@@ -97,7 +97,7 @@ export default function AdminWorkOverviewPage() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const hasEditPerm = hasPermission('edit_work');
+  const hasEditPerm = hasPermission('edit_work') || profile?.user_role === 'admin' || profile?.user_role === 'super_admin';
   const isWorkOwnerOrSupervisor = (work: UserWorkData) => work.user_id === user?.id || (work.assigned_by && work.assigned_by === profile?.full_name);
   const canEditWork = (work: UserWorkData) => hasEditPerm || isWorkOwnerOrSupervisor(work);
 
@@ -271,10 +271,7 @@ export default function AdminWorkOverviewPage() {
         </div>
       </div>
 
-
-
-      {myWorkSummary.totalWorks > 0 && (
-        <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg shadow-sm">
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg shadow-sm">
           <div
             className="p-4 cursor-pointer"
             onClick={() => setShowMyWorkSection(!showMyWorkSection)}
@@ -334,9 +331,8 @@ export default function AdminWorkOverviewPage() {
             </div>
           )}
         </div>
-      )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 sm:gap-4">
         <button
           onClick={() => {
             if (activeCardFilter === 'usersWithWork') {
@@ -851,7 +847,6 @@ export default function AdminWorkOverviewPage() {
       {selectedWorkId && (
         <AdminWorkDetailModal
           workId={selectedWorkId}
-          isOpen={true}
           onClose={() => {
             setSelectedWorkId(null);
             fetchData();

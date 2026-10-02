@@ -2,6 +2,7 @@ import { ReactNode, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, PermissionName } from '../contexts/AuthContext';
 import NotificationBell from './NotificationBell';
+import SkillReminderModal from './SkillReminderModal';
 import {
   FlaskConical,
   LayoutDashboard,
@@ -78,15 +79,16 @@ export default function Layout({ children }: LayoutProps) {
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="lg:hidden fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-30">
-        <div className="flex items-center justify-between p-4">
+        <div className="flex items-center justify-between px-4 py-2 sm:py-3">
           <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-24" />
+            <img src="/logo.png" alt="SC Lab Logo" className="h-10 sm:h-12 w-auto object-contain" />
           </div>
           <div className="flex items-center gap-2">
             <NotificationBell />
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
               className="p-2 rounded-lg hover:bg-gray-100 transition"
+              aria-label="Toggle navigation menu"
             >
               {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
             </button>
@@ -99,9 +101,9 @@ export default function Layout({ children }: LayoutProps) {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
-        <div className="p-6 border-b border-gray-200">
+        <div className="p-4 sm:p-6 border-b border-gray-200">
           <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-24" />
+            <img src="/logo.png" alt="SC Lab Logo" className="h-14 sm:h-16 w-auto object-contain" />
           </div>
         </div>
 
@@ -162,8 +164,10 @@ export default function Layout({ children }: LayoutProps) {
         <header className="hidden lg:flex items-center justify-end bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-20">
           <NotificationBell />
         </header>
-        <main className="pt-20 lg:pt-0 p-6">{children}</main>
+        <main className="pt-16 sm:pt-20 lg:pt-0 p-4 sm:p-6">{children}</main>
       </div>
+
+      <SkillReminderModal />
     </div>
   );
 }

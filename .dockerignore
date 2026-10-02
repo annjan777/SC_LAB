@@ -1,0 +1,12 @@
+node_modules
+server/node_modules
+.git
+.github
+.DS_Store
+dist
+server/dist
+server/backups/*.zip
+*.log
+npm-debug.log*
+.idea
+.vscode

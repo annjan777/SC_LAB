@@ -7,6 +7,7 @@ import { authenticate, requirePermission } from '../middleware/auth.js';
 import { sendTempPasswordEmail, generateTempPassword } from '../utils/email.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
 import { createNotification } from '../services/notificationService.js';
+import { extractIndianPhone, validateEmail } from '../utils/userValidation.js';
 
 const router = Router();
 
@@ -18,8 +19,28 @@ function isValidPassword(password: string): boolean {
 // POST /api/admin/users - create user (admin creating a user)
 router.post('/users', authenticate, requirePermission('manage_users'), async (req: Request, res: Response) => {
   try {
-    const { email, password, full_name, role, role_id } = req.body;
+    const { email, password, full_name, role, role_id, phone } = req.body;
     
+    // Validate email domain and format
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.isValid) {
+      return res.status(400).json({ error: emailValidation.error });
+    }
+    const cleanEmail = emailValidation.email;
+
+    // Validate and extract 10-digit Indian contact number
+    const phoneValidation = extractIndianPhone(phone, true);
+    if (!phoneValidation.isValid) {
+      return res.status(400).json({ error: phoneValidation.error });
+    }
+    const cleanPhone = phoneValidation.phone;
+
+    // Check if user already exists
+    const existing = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
+    if (existing.rows.length > 0) {
+      return res.status(400).json({ error: 'A user with this email address already exists' });
+    }
+
     if (password && !isValidPassword(password)) {
       return res.status(400).json({ error: 'Password must be at least 8 characters long and contain uppercase, lowercase, and numbers' });
     }
@@ -28,9 +49,7 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
     const hash = await bcrypt.hash(generatedPassword, 10);
     const requestedRole = role || 'user';
 
-    // Resolve the role name from role_id when provided (the "Add User" UI sends role_id, not
-    // role) so the user_role column always reflects what was actually selected, rather than
-    // silently defaulting to 'user'.
+    // Resolve the role name from role_id when provided
     let resolvedRoleId = role_id;
     let resolvedRoleName = requestedRole;
     if (resolvedRoleId) {
@@ -48,31 +67,25 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
       resolvedRoleName = r.rows[0].name;
     }
 
-    // Admin accounts cannot be created directly through this endpoint — only promoted to
-    // afterwards via Settings > Roles & Permissions, so account creation never defaults to
-    // (or is used to directly grant) the highest privilege tier.
     if (resolvedRoleName.toLowerCase() === 'admin') {
       return res.status(400).json({ error: 'Admin accounts cannot be created directly. Create the user first, then promote them to Admin from Settings.' });
     }
 
     const userResult = await query(
       'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
-      [email, hash]
+      [cleanEmail, hash]
     );
     const userId = userResult.rows[0].id;
 
     await query(
-      `INSERT INTO user_profiles (id, full_name, email, user_role, role_id, require_password_change, temp_password_expires_at)
-       VALUES ($1, $2, $3, $4, $5, true, NOW() + INTERVAL '24 hours')`,
-      [userId, full_name || 'New User', email, resolvedRoleName.toLowerCase(), resolvedRoleId]
+      `INSERT INTO user_profiles (id, full_name, email, phone, user_role, role_id, require_password_change, is_profile_completed, temp_password_expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6, true, false, NOW() + INTERVAL '24 hours')`,
+      [userId, full_name || 'New User', cleanEmail, cleanPhone, resolvedRoleName.toLowerCase(), resolvedRoleId]
     );
 
-    // Account creation succeeds even if the welcome email can't be sent — the admin can share
-    // the returned credentials manually, and the user can always recover access via Forgot
-    // Password afterwards, so a mail-provider outage shouldn't block onboarding.
-    sendTempPasswordEmail(email, full_name || 'New User', generatedPassword).then(emailResult => {
+    sendTempPasswordEmail(cleanEmail, full_name || 'New User', generatedPassword).then(emailResult => {
       if (!emailResult.success) {
-        console.log(`[DEV MODE] Password for ${email}: ${generatedPassword}`);
+        console.log(`[DEV MODE] Password for ${cleanEmail}: ${generatedPassword}`);
       }
     }).catch(err => console.error('Background email error:', err));
 
@@ -88,10 +101,53 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
   }
 });
 
+function parseDateForDb(val: any): string | null {
+  if (!val || typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  if (!trimmed || ['n/a', 'na', '-', 'nil', 'null', 'none'].includes(trimmed.toLowerCase())) {
+    return null;
+  }
+  if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(trimmed)) {
+    const d = new Date(trimmed);
+    return isNaN(d.getTime()) ? null : trimmed;
+  }
+  const dmyMatch = trimmed.match(/^(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})$/);
+  if (dmyMatch) {
+    const [_, d, m, y] = dmyMatch;
+    const iso = `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+    const parsed = new Date(iso);
+    return isNaN(parsed.getTime()) ? null : iso;
+  }
+  const general = new Date(trimmed);
+  if (!isNaN(general.getTime())) {
+    return general.toISOString().split('T')[0];
+  }
+  return null;
+}
+
 // POST /api/admin/users/bulk-import-single
 router.post('/users/bulk-import-single', authenticate, requirePermission('manage_users'), async (req: Request, res: Response) => {
   try {
     const { email, password, full_name, role, ...extraFields } = req.body;
+    
+    // Validate email domain and format
+    const emailValidation = validateEmail(email);
+    if (!emailValidation.isValid) {
+      return res.status(400).json({ error: emailValidation.error });
+    }
+    const cleanEmail = emailValidation.email;
+
+    // Validate and extract 10-digit Indian contact number if provided
+    if (extraFields.phone) {
+      const phoneValidation = extractIndianPhone(extraFields.phone, false);
+      if (!phoneValidation.isValid) {
+        return res.status(400).json({ error: phoneValidation.error });
+      }
+      extraFields.phone = phoneValidation.phone;
+    } else {
+      extraFields.phone = null;
+    }
+
     const generatedPassword = password || generateTempPassword();
     const hash = await bcrypt.hash(generatedPassword, 10);
     const userRole = role || 'user';
@@ -100,23 +156,118 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
       return res.status(400).json({ error: 'Admin accounts cannot be created via bulk import. Import the user first, then promote them to Admin from Settings.' });
     }
 
-    const existingUser = await query('SELECT id FROM users WHERE email = $1', [email]);
+    const existingUser = await query('SELECT id FROM users WHERE LOWER(email) = LOWER($1)', [cleanEmail]);
     if (existingUser.rows.length > 0) {
-      return res.status(409).json({ error: 'Email already exists' });
+      const existingUserId = existingUser.rows[0].id;
+      const currentProfileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [existingUserId]);
+      const currentProfile = currentProfileResult.rows[0] || {};
+
+      // Prepare fields to update: ONLY update columns that are currently null or empty string in DB,
+      // and ONLY if the incoming CSV has a non-empty value!
+      // Do NOT replace or change any data that is already present in the database!
+      const fieldsToConsider: Record<string, any> = {
+        full_name: full_name || null,
+        designation: extraFields.designation || null,
+        program_designation: extraFields.program_designation || extraFields.designation || null,
+        phone: extraFields.phone || null,
+        project_name: extraFields.project_name || null,
+        project_code: extraFields.project_code || null,
+        project_start_date: parseDateForDb(extraFields.project_start_date),
+        project_end_date: parseDateForDb(extraFields.project_end_date),
+        project_tenure: extraFields.project_tenure || null,
+        staff_contract_start_date: parseDateForDb(extraFields.staff_contract_start_date),
+        staff_contract_end_date: parseDateForDb(extraFields.staff_contract_end_date),
+        contract_tenure: extraFields.contract_tenure || null,
+        project_role_responsibility: extraFields.project_role_responsibility || null,
+        project_pi_coordinator: extraFields.project_pi_coordinator || null,
+        reporting_manager: extraFields.reporting_manager || extraFields.supervisor || null,
+        supervisor: extraFields.supervisor || extraFields.reporting_manager || null,
+        current_status: extraFields.current_status || null,
+        contract_status: extraFields.contract_status || null,
+        remarks_staff: extraFields.remarks_staff || null,
+        remarks_manager: extraFields.remarks_manager || null,
+        roll_number: extraFields.roll_number || null,
+        employee_id: extraFields.employee_id || null,
+        department: extraFields.department || null,
+      };
+
+      const updateKeys: string[] = [];
+      const updateValues: any[] = [];
+
+      for (const [key, val] of Object.entries(fieldsToConsider)) {
+        if (val !== null && val !== undefined && val !== '') {
+          const currentVal = currentProfile[key];
+          // Check if current value in DB is missing (null, undefined, empty string, or default placeholder 'New User' for full_name)
+          const isMissing = currentVal === null || currentVal === undefined || currentVal === '' || (key === 'full_name' && currentVal === 'New User');
+          if (isMissing) {
+            updateKeys.push(key);
+            updateValues.push(val);
+          }
+        }
+      }
+
+      if (updateKeys.length > 0) {
+        const safeKeys = updateKeys.map(k => sanitizeIdentifier(k));
+        const setClauses = safeKeys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
+        updateValues.push(existingUserId);
+        await query(`UPDATE user_profiles SET ${setClauses}, updated_at = now() WHERE id = $${updateValues.length}`, updateValues);
+      }
+
+      const updatedProfile = await query('SELECT * FROM user_profiles WHERE id = $1', [existingUserId]);
+      return res.status(200).json({
+        ...updatedProfile.rows[0],
+        is_existing: true,
+        fields_updated: updateKeys,
+        message: updateKeys.length > 0
+          ? `Updated missing fields for existing user: ${updateKeys.join(', ')}`
+          : 'Existing user already has all provided data (no fields overwritten)',
+      });
     }
 
+    // NEW USER CREATION
     const userResult = await query(
       'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id',
-      [email, hash]
+      [cleanEmail, hash]
     );
     const userId = userResult.rows[0].id;
 
     const roleResult = await query('SELECT id FROM roles WHERE LOWER(name) = $1', [userRole.toLowerCase()]);
     const roleId = roleResult.rows[0]?.id || null;
 
+    if (extraFields.designation && !extraFields.program_designation) {
+      extraFields.program_designation = extraFields.designation;
+    } else if (extraFields.program_designation && !extraFields.designation) {
+      extraFields.designation = extraFields.program_designation;
+    }
+    if (extraFields.reporting_manager && !extraFields.supervisor) {
+      extraFields.supervisor = extraFields.reporting_manager;
+    } else if (extraFields.supervisor && !extraFields.reporting_manager) {
+      extraFields.reporting_manager = extraFields.supervisor;
+    }
+
+    // Clean dates
+    if (extraFields.project_start_date !== undefined) extraFields.project_start_date = parseDateForDb(extraFields.project_start_date);
+    if (extraFields.project_end_date !== undefined) extraFields.project_end_date = parseDateForDb(extraFields.project_end_date);
+    if (extraFields.staff_contract_start_date !== undefined) extraFields.staff_contract_start_date = parseDateForDb(extraFields.staff_contract_start_date);
+    if (extraFields.staff_contract_end_date !== undefined) extraFields.staff_contract_end_date = parseDateForDb(extraFields.staff_contract_end_date);
+    if (extraFields.joining_date !== undefined) extraFields.joining_date = parseDateForDb(extraFields.joining_date);
+
+    // Convert empty strings to null
+    for (const key of Object.keys(extraFields)) {
+      if (extraFields[key] === '') {
+        extraFields[key] = null;
+      }
+    }
+
     const profileFields: Record<string, any> = {
-      id: userId, full_name: full_name || 'New User', email, user_role: userRole.toLowerCase(),
-      role_id: roleId, require_password_change: true, ...extraFields,
+      id: userId,
+      full_name: full_name || 'New User',
+      email: cleanEmail,
+      user_role: userRole.toLowerCase(),
+      role_id: roleId,
+      require_password_change: true,
+      is_profile_completed: false,
+      ...extraFields,
     };
     const rawKeys = Object.keys(profileFields);
     const safeKeys = rawKeys.map(k => sanitizeIdentifier(k));

@@ -2,6 +2,7 @@ import { useState, FormEvent, useEffect } from 'react';
 import { X, Copy, CheckCircle, KeyRound } from 'lucide-react';
 import { api } from '../lib/api';
 import type { Role } from '../lib/types';
+import { extractIndianPhone, validateEmail } from '../utils/userValidation';
 
 interface AddUserModalProps {
   isOpen: boolean;
@@ -72,13 +73,27 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }: AddUserMo
       return;
     }
 
+    // Validate email domain
+    const emailValidation = validateEmail(formData.email);
+    if (!emailValidation.isValid) {
+      setError(emailValidation.error || 'Please enter a valid email address');
+      return;
+    }
+
+    // Validate and extract 10-digit Indian contact number
+    const phoneValidation = extractIndianPhone(formData.phone, true);
+    if (!phoneValidation.isValid) {
+      setError(phoneValidation.error || 'Please enter a valid Indian contact number');
+      return;
+    }
+
     setLoading(true);
 
     try {
       const { data: result, error: createError } = await api.post('/api/admin/users', {
         full_name: formData.full_name,
-        email: formData.email,
-        phone: formData.phone,
+        email: emailValidation.email,
+        phone: phoneValidation.phone,
         user_role: formData.user_role,
         role_id: formData.role_id,
       });
@@ -87,7 +102,7 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }: AddUserMo
         throw new Error(typeof createError === 'string' ? createError : (createError as any).message || 'Failed to create user');
       }
 
-      setCreatedUserEmail(formData.email);
+      setCreatedUserEmail(emailValidation.email);
       setCreatedPassword(result.password || '');
       setEmailSent(result.email_sent || false);
       setEmailError(result.email_error || '');
@@ -314,7 +329,7 @@ export default function AddUserModal({ isOpen, onClose, onUserAdded }: AddUserMo
                 value={formData.phone}
                 onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="e.g., 9876543210"
+                placeholder="Phone number"
               />
             </div>
 
