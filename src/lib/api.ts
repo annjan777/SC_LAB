@@ -93,7 +93,7 @@ export const api = {
 // --- Auth API ---
 export const authApi = {
   login: (email: string, password: string) =>
-    api.post<{ token: string; user: any; profile: any; permissions: string[]; restricted?: boolean }>(
+    api.post<{ token: string; user: any; profile: any; permissions: string[]; restricted?: boolean; skillStatus?: any }>(
       '/api/auth/login',
       { email, password }
     ),
@@ -105,7 +105,7 @@ export const authApi = {
     ),
 
   getMe: () =>
-    api.get<{ user: any; profile: any; permissions: string[] }>('/api/auth/me'),
+    api.get<{ user: any; profile: any; permissions: string[]; skillStatus?: any }>('/api/auth/me'),
 
   changePassword: (password: string, currentPassword?: string) =>
     api.post('/api/auth/change-password', { password, currentPassword }),
