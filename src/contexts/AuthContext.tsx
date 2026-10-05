@@ -94,12 +94,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [skillStatus, setSkillStatus] = useState<SkillReminderStatus | null>(null);
 
   useEffect(() => {
+    const isPublicPath = (pathname: string) => {
+      return pathname === '/login' || pathname.startsWith('/reset-password') || pathname.startsWith('/auth/callback');
+    };
+
     const checkTokenValidity = () => {
       const token = getStoredToken();
       if (!token) return false;
       try {
         const payload = JSON.parse(atob(token.split('.')[1]));
-        if (payload.purpose === 'password_reset') return true;
+        // Password reset tokens are single-purpose and not standard session tokens
+        if (payload.purpose === 'password_reset') return false;
 
         const nowSec = Math.floor(Date.now() / 1000);
         // Check if token has expired (2-hour limit)
@@ -115,11 +120,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const token = getStoredToken();
     if (token) {
+      try {
+        const payload = JSON.parse(atob(token.split('.')[1]));
+        if (payload.purpose === 'password_reset') {
+          // If stored token is a password reset token, do not attempt to load a user session
+          // (/api/auth/me will reject reset tokens with 401).
+          setLoading(false);
+          return;
+        }
+      } catch {
+        // ignore decode errors
+      }
+
       if (!checkTokenValidity()) {
         signOut();
         setLoading(false);
-        if (window.location.pathname !== '/login') {
-          window.location.href = '/login?session_expired=true';
+        if (!isPublicPath(window.location.pathname)) {
+          window.location.href = '/login';
         }
       } else {
         loadSession();
@@ -131,16 +148,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Active session interval: automatically log out when 2 hours have passed
     const intervalId = setInterval(() => {
       const activeToken = getStoredToken();
-      if (activeToken && !checkTokenValidity()) {
-        console.warn('[AUTH] 2-hour active session expired. Logging out.');
-        signOut();
-        window.location.href = '/login?session_expired=true';
+      if (activeToken) {
+        try {
+          const payload = JSON.parse(atob(activeToken.split('.')[1]));
+          if (payload.purpose === 'password_reset') return;
+        } catch {
+          // ignore
+        }
+
+        if (!checkTokenValidity()) {
+          console.warn('[AUTH] 2-hour active session expired. Logging out.');
+          signOut();
+          if (!isPublicPath(window.location.pathname)) {
+            window.location.href = '/login?session_expired=true';
+          }
+        }
       }
     }, 20000);
 
     const handleUnauthorized = () => {
       signOut();
-      window.location.href = '/login?session_expired=true';
+      if (!isPublicPath(window.location.pathname)) {
+        window.location.href = '/login';
+      }
     };
     window.addEventListener('auth:unauthorized', handleUnauthorized);
 

@@ -14,6 +14,7 @@ export default function LoginPage() {
   const [resetEmail, setResetEmail] = useState('');
   const [resetLoading, setResetLoading] = useState(false);
   const [resetSuccess, setResetSuccess] = useState(false);
+  const [resetModalError, setResetModalError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const { signIn } = useAuth();
   const navigate = useNavigate();
@@ -23,6 +24,8 @@ export default function LoginPage() {
     const params = new URLSearchParams(location.search);
     if (params.get('session_expired') === 'true') {
       setError('Your session has expired after 2 hours. Please sign in again.');
+      // Remove query param from browser address bar so it doesn't persist on refresh or navigation
+      window.history.replaceState({}, '', window.location.pathname);
     } else if (location.state?.message) {
       setSuccessMessage(location.state.message);
       setTimeout(() => setSuccessMessage(''), 5000);
@@ -50,12 +53,12 @@ export default function LoginPage() {
 
   const handleResetPassword = async (e: FormEvent) => {
     e.preventDefault();
-    setError('');
+    setResetModalError('');
     setResetLoading(true);
 
     const { error: resetError } = await authApi.forgotPassword(resetEmail);
     if (resetError) {
-      setError(resetError.message);
+      setResetModalError(resetError.message);
     } else {
       setResetSuccess(true);
     }
@@ -127,7 +130,10 @@ export default function LoginPage() {
           <div className="mt-6 text-center">
             <button
               type="button"
-              onClick={() => setShowResetPassword(true)}
+              onClick={() => {
+                setResetModalError('');
+                setShowResetPassword(true);
+              }}
               className="text-sm text-blue-600 hover:text-blue-700 transition"
             >
               Forgot your password?
@@ -154,6 +160,7 @@ export default function LoginPage() {
                     setShowResetPassword(false);
                     setResetSuccess(false);
                     setResetEmail('');
+                    setResetModalError('');
                   }}
                   className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition"
                 >
@@ -167,9 +174,9 @@ export default function LoginPage() {
                   Enter your email address and we'll send you a link to reset your password.
                 </p>
 
-                {error && (
+                {resetModalError && (
                   <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
-                    {error}
+                    {resetModalError}
                   </div>
                 )}
 
@@ -194,7 +201,7 @@ export default function LoginPage() {
                       type="button"
                       onClick={() => {
                         setShowResetPassword(false);
-                        setError('');
+                        setResetModalError('');
                         setResetEmail('');
                       }}
                       disabled={resetLoading}

@@ -11,6 +11,7 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [resetToken, setResetToken] = useState<string | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -21,17 +22,22 @@ export default function ResetPasswordPage() {
       const searchParams = new URLSearchParams(location.search);
       const token = searchParams.get('token');
 
-      if (token) {
-        // Store the reset token so subsequent API calls are authorized
-        setToken(token);
+      if (!token) {
+        setError('No password reset token was provided. Please use the link sent to your email.');
+        setIsCheckingSession(false);
+        return;
       }
 
-      // Verify the token is valid by calling verifyResetToken
-      const { data, error: sessionError } = await authApi.verifyResetToken();
+      setResetToken(token);
+      // Ensure localStorage has no leftover token interfering with sessions
+      setToken(null);
+
+      // Verify the token is valid by calling verifyResetToken with explicit token
+      const { data, error: sessionError } = await authApi.verifyResetToken(token);
 
       if (sessionError || !data) {
         console.error('Session error:', sessionError);
-        setError('Your password reset link may have expired. Please request a new one.');
+        setError('Your password reset link may have expired or is invalid. Please request a new one.');
         setToken(null);
         setIsCheckingSession(false);
         return;
@@ -75,7 +81,10 @@ export default function ResetPasswordPage() {
     setLoading(true);
 
     try {
-      const { error: updateError } = await authApi.changePassword(newPassword);
+      const searchParams = new URLSearchParams(location.search);
+      const tokenToUse = resetToken || searchParams.get('token') || undefined;
+
+      const { error: updateError } = await authApi.changePassword(newPassword, undefined, tokenToUse);
 
       if (updateError) {
         throw updateError;
@@ -125,14 +134,12 @@ export default function ResetPasswordPage() {
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6">
               {error}
-              {error.includes('expired') && (
-                <button
-                  onClick={() => navigate('/login')}
-                  className="block w-full mt-3 text-center text-sm text-blue-600 hover:text-blue-700 underline"
-                >
-                  Go back to login and request a new reset link
-                </button>
-              )}
+              <button
+                onClick={() => navigate('/login')}
+                className="block w-full mt-3 text-center text-sm text-blue-600 hover:text-blue-700 underline"
+              >
+                Go back to login and request a new reset link
+              </button>
             </div>
           )}
 

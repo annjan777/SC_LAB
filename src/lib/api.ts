@@ -40,8 +40,8 @@ async function request<T = any>(
     const headers: Record<string, string> = {
       ...(fetchOptions.headers as Record<string, string> || {}),
     };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    if (!(fetchOptions.body instanceof FormData)) {
+    if (token && !headers['Authorization']) headers['Authorization'] = `Bearer ${token}`;
+    if (!(fetchOptions.body instanceof FormData) && !headers['Content-Type']) {
       headers['Content-Type'] = 'application/json';
     }
 
@@ -49,7 +49,13 @@ async function request<T = any>(
     const json = await res.json().catch(() => null);
 
     if (!res.ok) {
-      if (res.status === 401 && path !== '/api/auth/login') {
+      const authExemptPaths = [
+        '/api/auth/login',
+        '/api/auth/verify-reset-token',
+        '/api/auth/forgot-password',
+      ];
+      const isResetPage = typeof window !== 'undefined' && window.location.pathname.startsWith('/reset-password');
+      if (res.status === 401 && !authExemptPaths.some(p => path.startsWith(p)) && !isResetPage) {
         setToken(null);
         window.dispatchEvent(new Event('auth:unauthorized'));
       }
@@ -107,14 +113,22 @@ export const authApi = {
   getMe: () =>
     api.get<{ user: any; profile: any; permissions: string[]; skillStatus?: any }>('/api/auth/me'),
 
-  changePassword: (password: string, currentPassword?: string) =>
-    api.post('/api/auth/change-password', { password, currentPassword }),
+  changePassword: (password: string, currentPassword?: string, tokenOverride?: string) =>
+    request('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ password, currentPassword }),
+      headers: tokenOverride ? { Authorization: `Bearer ${tokenOverride}` } : undefined,
+    }),
 
   adminResetPassword: (userId: string, newPassword?: string) =>
     api.post('/api/auth/admin-reset-password', { userId, newPassword }),
 
   forgotPassword: (email: string) =>
     api.post<{ message: string }>('/api/auth/forgot-password', { email }),
-  verifyResetToken: () =>
-    api.get<{ valid: boolean; user: any }>('/api/auth/verify-reset-token'),
+
+  verifyResetToken: (tokenOverride?: string) =>
+    request<{ valid: boolean; user: any }>('/api/auth/verify-reset-token', {
+      method: 'GET',
+      headers: tokenOverride ? { Authorization: `Bearer ${tokenOverride}` } : undefined,
+    }),
 };
