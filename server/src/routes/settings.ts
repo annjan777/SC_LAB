@@ -5,7 +5,7 @@ import { authenticate, requirePermission } from '../middleware/auth.js';
 const router = Router();
 
 // --- ROLES ---
-router.get('/roles', authenticate, async (_req: Request, res: Response) => {
+router.get('/roles', authenticate, requirePermission('manage_roles', 'manage_settings'), async (_req: Request, res: Response) => {
   try {
     const result = await query('SELECT * FROM roles ORDER BY created_at');
     res.json(result.rows);
@@ -33,7 +33,7 @@ router.delete('/roles/:id', authenticate, requirePermission('manage_roles', 'man
 });
 
 // --- PERMISSIONS ---
-router.get('/permissions', authenticate, async (_req: Request, res: Response) => {
+router.get('/permissions', authenticate, requirePermission('manage_roles', 'manage_settings'), async (_req: Request, res: Response) => {
   try {
     const result = await query('SELECT * FROM permissions ORDER BY category, display_name');
     res.json(result.rows);
@@ -41,7 +41,7 @@ router.get('/permissions', authenticate, async (_req: Request, res: Response) =>
 });
 
 // --- ROLE PERMISSIONS ---
-router.get('/role-permissions/:roleId', authenticate, async (req: Request, res: Response) => {
+router.get('/role-permissions/:roleId', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT rp.*, p.name, p.display_name, p.category
@@ -68,7 +68,7 @@ router.put('/role-permissions/:roleId', authenticate, requirePermission('manage_
 });
 
 // --- USER PERMISSIONS (direct grants) ---
-router.get('/user-permissions/:userId', authenticate, async (req: Request, res: Response) => {
+router.get('/user-permissions/:userId', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req: Request, res: Response) => {
   try {
     const result = await query(
       `SELECT up.*, p.name, p.display_name, p.category

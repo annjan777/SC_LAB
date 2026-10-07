@@ -107,7 +107,7 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
             }
         }
         const hash = await bcrypt.hash(password, 10);
-        await query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hash, req.user.id]);
+        await query('UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL, updated_at = now() WHERE id = $2', [hash, req.user.id]);
         await query('UPDATE user_profiles SET last_password_changed_at = now(), require_password_change = false WHERE id = $1', [req.user.id]);
         const userRow = await query('SELECT id, email FROM users WHERE id = $1', [req.user.id]);
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [req.user.id]);
@@ -161,18 +161,17 @@ router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, 
             return res.status(404).json({ error: 'No account found with that email address.' });
         }
         const user = userResult.rows[0];
-        const token = generatePasswordResetToken(user.id, user.email);
+        const token = crypto.randomBytes(32).toString('hex');
         const resetUrl = `${APP_URL}/reset-password?token=${token}`;
-        // Invalidate the old password so the user cannot log in with it anymore
-        const randomPassword = crypto.randomBytes(32).toString('hex');
-        const randomHash = await bcrypt.hash(randomPassword, 10);
-        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [randomHash, user.id]);
+        // Store the reset token with a 1-hour expiration timestamp.
+        // CRITICAL SECURITY FIX: Do NOT touch password_hash! The existing password remains active
+        // until the user actually enters and confirms a new password via the reset link.
+        await query(`UPDATE users
+       SET reset_password_token = $1, reset_password_expires = now() + interval '1 hour', updated_at = now()
+       WHERE id = $2`, [token, user.id]);
         sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl).then(sendResult => {
             if (!sendResult.success) {
-                console.log(`\n======================================================`);
-                console.log(`[DEV MODE PASSWORD RESET LINK FOR ${user.email}]:`);
-                console.log(`   ${resetUrl}`);
-                console.log(`======================================================\n`);
+                console.warn(`[AUTH] Failed to dispatch password reset email to ${user.email}`);
             }
         }).catch(err => console.error('Background email error:', err));
         res.json({ message: 'A password reset link has been sent to your email.' });
@@ -219,7 +218,7 @@ router.post('/admin-reset-password', authenticate, async (req, res) => {
             const { full_name, email } = userInfo.rows[0];
             sendTempPasswordEmail(email, full_name, password).then(result => {
                 if (!result.success) {
-                    console.log(`[DEV MODE] Password for ${email} reset to: ${password}`);
+                    console.warn(`[AUTH] Failed to dispatch temporary password email to ${email}`);
                 }
             }).catch(err => console.error('Background email error:', err));
         }

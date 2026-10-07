@@ -16,11 +16,17 @@ import {
   Loader2,
 } from 'lucide-react';
 import DateRangeFilter from '../../components/DateRangeFilter';
+import { PageHeader, Button, Card, EmptyState } from '../../components/ui';
 import {
   generateUserDirectoryReport,
   generateUserSkillsMatrixReport,
   generateInventoryCatalogReport,
   generateInventoryConditionReport,
+  generateInventoryRequestsReport,
+  generateConsumablesDeductionReport,
+  generateEquipmentLoansReport,
+  generateEquipmentReturnsReport,
+  generateFacilityEquipmentReport,
   generateProcurementReport,
   generateLeaveAnalyticsReport,
   generateWorkProgressReport,
@@ -70,11 +76,56 @@ export default function AdminReportsPage() {
     {
       id: 'inventory-catalog',
       title: 'Inventory Catalog',
-      description: 'Complete inventory listing with quantities and locations',
+      description: 'Complete inventory listing with classification, locations, and vendors',
       icon: Package,
       category: 'inventory',
       supportsDateRange: true,
       action: generateInventoryCatalogReport,
+    },
+    {
+      id: 'inventory-requests',
+      title: 'Inventory Requests & Transactions',
+      description: 'Complete transaction history of all requests, approvals, issues, and loan statuses',
+      icon: Package,
+      category: 'inventory',
+      supportsDateRange: true,
+      action: generateInventoryRequestsReport,
+    },
+    {
+      id: 'inventory-consumables',
+      title: 'Consumables & Stock Deductions',
+      description: 'Chemicals and materials issued with quantity-based stock deduction records',
+      icon: Package,
+      category: 'inventory',
+      supportsDateRange: true,
+      action: generateConsumablesDeductionReport,
+    },
+    {
+      id: 'inventory-equipment',
+      title: 'Equipment Assignments & Active Loans',
+      description: 'Assigned equipment, active loans, return dates, and overdue items',
+      icon: Package,
+      category: 'inventory',
+      supportsDateRange: true,
+      action: generateEquipmentLoansReport,
+    },
+    {
+      id: 'inventory-returns',
+      title: 'Equipment Returns & Condition Log',
+      description: 'Return history, physical condition at return, and inspection remarks',
+      icon: Package,
+      category: 'inventory',
+      supportsDateRange: true,
+      action: generateEquipmentReturnsReport,
+    },
+    {
+      id: 'facility-equipment',
+      title: 'Facility-wise Equipment Mapping',
+      description: 'Equipment associated with facilities including project codes and funding sources',
+      icon: Building2,
+      category: 'facilities',
+      supportsDateRange: false,
+      action: generateFacilityEquipmentReport,
     },
     {
       id: 'inventory-condition',
@@ -183,34 +234,31 @@ export default function AdminReportsPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Advanced Reports</h1>
-        <p className="text-gray-600 mt-2">Generate comprehensive reports and export as PDF documents</p>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader title="Advanced Reports" />
 
       {error && (
-        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
           <AlertCircle className="h-5 w-5 text-red-600 mr-2 flex-shrink-0 mt-0.5" />
           <p className="text-red-800">{error}</p>
         </div>
       )}
 
       {success && (
-        <div className="mb-6 bg-green-50 border border-green-200 rounded-lg p-4">
+        <div className="bg-green-50 border border-green-200 rounded-lg p-4">
           <p className="text-green-800">{success}</p>
         </div>
       )}
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <div className="lg:col-span-1">
+        <div className="lg:col-span-1 space-y-6">
           <DateRangeFilter
             onApply={setDateRange}
             label="Date Range Filter"
           />
 
-          <div className="mt-6 bg-white rounded-lg border border-gray-200 p-4">
-            <h3 className="font-medium text-gray-900 mb-3">Categories</h3>
+          <Card className="p-4">
+            <h3 className="sc-card-title mb-3">Categories</h3>
             <div className="space-y-1">
               {categories.map((category) => (
                 <button
@@ -231,9 +279,9 @@ export default function AdminReportsPage() {
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
 
-          <div className="mt-6 bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
             <h3 className="font-medium text-blue-900 mb-2">Quick Tips</h3>
             <ul className="text-sm text-blue-800 space-y-2">
               <li className="flex items-start">
@@ -260,64 +308,61 @@ export default function AdminReportsPage() {
               const requiresDateRange = report.supportsDateRange && dateRange;
 
               return (
-                <div
+                <Card
                   key={report.id}
-                  className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow"
+                  hover
+                  className="p-6 flex flex-col justify-between"
                 >
-                  <div className="flex items-start justify-between mb-4">
-                    <div className="p-3 bg-blue-50 rounded-lg">
-                      <Icon className="h-6 w-6 text-blue-600" />
+                  <div>
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="p-3 bg-blue-50 text-blue-600 rounded-lg">
+                        <Icon className="h-6 w-6" />
+                      </div>
+                      {report.supportsDateRange && (
+                        <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full font-medium">
+                          Date Range
+                        </span>
+                      )}
                     </div>
-                    {report.supportsDateRange && (
-                      <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                        Date Range
-                      </span>
-                    )}
+
+                    <h3 className="sc-card-title mb-2">
+                      {report.title}
+                    </h3>
+                    <p className="sc-muted text-sm mb-4 min-h-[40px]">
+                      {report.description}
+                    </p>
                   </div>
 
-                  <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                    {report.title}
-                  </h3>
-                  <p className="text-sm text-gray-600 mb-4 min-h-[40px]">
-                    {report.description}
-                  </p>
+                  <div>
+                    <Button
+                      variant="primary"
+                      className="w-full"
+                      onClick={() => handleGenerateReport(report)}
+                      isLoading={isGenerating}
+                      leftIcon={!isGenerating ? <Download className="w-4 h-4" /> : undefined}
+                    >
+                      {isGenerating ? 'Generating...' : 'Generate Report'}
+                    </Button>
 
-                  <button
-                    onClick={() => handleGenerateReport(report)}
-                    disabled={isGenerating}
-                    className="w-full px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors font-medium flex items-center justify-center gap-2"
-                  >
-                    {isGenerating ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      <>
-                        <Download className="h-4 w-4" />
-                        Generate Report
-                      </>
+                    {report.supportsDateRange && requiresDateRange && (
+                      <p className="text-xs text-green-600 mt-2 text-center">
+                        Using custom date range
+                      </p>
                     )}
-                  </button>
-
-                  {report.supportsDateRange && requiresDateRange && (
-                    <p className="text-xs text-green-600 mt-2 text-center">
-                      Using custom date range
-                    </p>
-                  )}
-                </div>
+                  </div>
+                </Card>
               );
             })}
           </div>
 
           {filteredReports.length === 0 && (
-            <div className="bg-white rounded-lg border border-gray-200 p-12 text-center">
-              <FileText className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No Reports Found</h3>
-              <p className="text-gray-600">
-                No reports match the selected category.
-              </p>
-            </div>
+            <Card className="p-12">
+              <EmptyState
+                icon={FileText}
+                title="No Reports Found"
+                description="No reports match the selected category."
+              />
+            </Card>
           )}
         </div>
       </div>

@@ -10,6 +10,11 @@ import {
   fetchFacilitiesReportData,
   fetchRepositoryReportData,
   fetchAuditLogReportData,
+  fetchInventoryRequestsReportData,
+  fetchInventoryConsumablesReportData,
+  fetchInventoryEquipmentReportData,
+  fetchInventoryReturnsReportData,
+  fetchFacilityEquipmentReportData,
   calculateInventoryStats,
   calculateLeaveStats,
   calculateProcurementStats,
@@ -455,4 +460,211 @@ export const generateAuditLogReport = async (dateRange?: DateRange) => {
   pdf.addTable(columns, tableData, 'Audit Log Details');
 
   pdf.download(`audit_log_report_${new Date().toISOString().split('T')[0]}`);
+};
+
+export const generateInventoryRequestsReport = async (dateRange?: DateRange) => {
+  const requests = await fetchInventoryRequestsReportData(dateRange);
+  const pdf = new PDFReportGenerator('landscape');
+
+  pdf.addHeader({
+    title: 'Inventory Requests & Transactions Report',
+    subtitle: 'Full history of item requests, issues, and loan statuses',
+    dateRange,
+  });
+
+  const summary: SummaryItem[] = [
+    { label: 'Total Requests', value: requests.length },
+    { label: 'Pending', value: requests.filter((r: any) => r.status === 'pending').length },
+    { label: 'Active Loans', value: requests.filter((r: any) => r.status === 'issued').length },
+    { label: 'Returned', value: requests.filter((r: any) => r.status === 'returned').length },
+    { label: 'Overdue', value: requests.filter((r: any) => r.status === 'overdue').length },
+  ];
+
+  pdf.addSummarySection('Transaction Summary', summary);
+
+  const columns: TableColumn[] = [
+    { header: 'Request Date', dataKey: 'request_date_formatted' },
+    { header: 'Requester', dataKey: 'requester_name' },
+    { header: 'Item Name', dataKey: 'item_name' },
+    { header: 'Type', dataKey: 'classification' },
+    { header: 'Qty', dataKey: 'quantity' },
+    { header: 'Status', dataKey: 'status' },
+    { header: 'Returnable', dataKey: 'is_returnable_text' },
+    { header: 'Due Date', dataKey: 'expected_return_date' },
+    { header: 'Approver', dataKey: 'approver_name' },
+  ];
+
+  const tableData = requests.map((r: any) => ({
+    ...r,
+    request_date_formatted: r.request_date ? new Date(r.request_date).toLocaleDateString() : '-',
+    is_returnable_text: r.is_returnable ? 'Yes (Loan)' : 'No (Consumed)',
+    expected_return_date: r.expected_return_date ? new Date(r.expected_return_date).toLocaleDateString() : '-',
+    approver_name: r.approver_name || '-',
+  }));
+
+  pdf.addTable(columns, tableData, 'Requests & Transactions Log');
+  pdf.download(`inventory_requests_report_${new Date().toISOString().split('T')[0]}`);
+};
+
+export const generateConsumablesDeductionReport = async (dateRange?: DateRange) => {
+  const data = await fetchInventoryConsumablesReportData(dateRange);
+  const pdf = new PDFReportGenerator('landscape');
+
+  pdf.addHeader({
+    title: 'Consumables & Stock Deductions Report',
+    subtitle: 'Chemicals, reagents, and materials issued and deducted from stock',
+    dateRange,
+  });
+
+  const totalDeducted = data.reduce((sum: number, r: any) => sum + (r.quantity || 0), 0);
+  const summary: SummaryItem[] = [
+    { label: 'Total Issuances', value: data.length },
+    { label: 'Total Units Issued', value: totalDeducted },
+  ];
+
+  pdf.addSummarySection('Consumable Usage Summary', summary);
+
+  const columns: TableColumn[] = [
+    { header: 'Issue Date', dataKey: 'issue_date_formatted' },
+    { header: 'Consumable Item', dataKey: 'item_name' },
+    { header: 'Issued Qty', dataKey: 'quantity' },
+    { header: 'Remaining Stock', dataKey: 'current_stock' },
+    { header: 'Location', dataKey: 'location' },
+    { header: 'Issued To', dataKey: 'requester_name' },
+    { header: 'Issued By', dataKey: 'issuer_name' },
+    { header: 'P.O. Number', dataKey: 'po_number' },
+  ];
+
+  const tableData = data.map((r: any) => ({
+    ...r,
+    issue_date_formatted: r.issue_date ? new Date(r.issue_date).toLocaleDateString() : '-',
+    po_number: r.po_number || '-',
+    issuer_name: r.issuer_name || '-',
+  }));
+
+  pdf.addTable(columns, tableData, 'Consumables Issue & Deduction Log');
+  pdf.download(`consumables_deduction_report_${new Date().toISOString().split('T')[0]}`);
+};
+
+export const generateEquipmentLoansReport = async (dateRange?: DateRange) => {
+  const items = await fetchInventoryEquipmentReportData(dateRange);
+  const pdf = new PDFReportGenerator('landscape');
+
+  pdf.addHeader({
+    title: 'Equipment Assignment & Active Loans Report',
+    subtitle: 'Electronics, tools, appliances, and their current assigned users',
+    dateRange,
+  });
+
+  const assignedCount = items.filter((i: any) => !!i.assigned_to_name).length;
+  const summary: SummaryItem[] = [
+    { label: 'Total Equipment Items', value: items.length },
+    { label: 'Currently Assigned', value: assignedCount },
+    { label: 'Available in Lab', value: items.length - assignedCount },
+  ];
+
+  pdf.addSummarySection('Equipment Summary', summary);
+
+  const columns: TableColumn[] = [
+    { header: 'Equipment Name', dataKey: 'item_name' },
+    { header: 'Asset Tag', dataKey: 'asset_tag' },
+    { header: 'Serial Number', dataKey: 'serial_number' },
+    { header: 'Location', dataKey: 'location' },
+    { header: 'Facility', dataKey: 'facility_name' },
+    { header: 'Assigned User', dataKey: 'assigned_to_name' },
+    { header: 'Expected Return', dataKey: 'expected_return_date' },
+    { header: 'Condition', dataKey: 'condition' },
+  ];
+
+  const tableData = items.map((i: any) => ({
+    ...i,
+    facility_name: i.facility_name || 'Standalone',
+    asset_tag: i.asset_tag || '-',
+    serial_number: i.serial_number || '-',
+    assigned_to_name: i.assigned_to_name || 'Available (Unassigned)',
+    expected_return_date: i.expected_return_date ? new Date(i.expected_return_date).toLocaleDateString() : '-',
+  }));
+
+  pdf.addTable(columns, tableData, 'Equipment Inventory & Assignments');
+  pdf.download(`equipment_loans_report_${new Date().toISOString().split('T')[0]}`);
+};
+
+export const generateEquipmentReturnsReport = async (dateRange?: DateRange) => {
+  const returns = await fetchInventoryReturnsReportData(dateRange);
+  const pdf = new PDFReportGenerator('landscape');
+
+  pdf.addHeader({
+    title: 'Equipment Returns & Condition History',
+    subtitle: 'Record of returned equipment, condition checks, and remarks',
+    dateRange,
+  });
+
+  const summary: SummaryItem[] = [
+    { label: 'Total Returns Logged', value: returns.length },
+    { label: 'Good / New Condition', value: returns.filter((r: any) => ['good', 'new'].includes(r.returned_condition)).length },
+    { label: 'Fair / Poor / Damaged', value: returns.filter((r: any) => ['fair', 'poor', 'damaged'].includes(r.returned_condition)).length },
+  ];
+
+  pdf.addSummarySection('Return History Summary', summary);
+
+  const columns: TableColumn[] = [
+    { header: 'Return Date', dataKey: 'actual_return_date_formatted' },
+    { header: 'Equipment Name', dataKey: 'item_name' },
+    { header: 'Asset Tag', dataKey: 'asset_tag' },
+    { header: 'Returned By', dataKey: 'requester_name' },
+    { header: 'Condition Upon Return', dataKey: 'returned_condition' },
+    { header: 'Inspection Remarks', dataKey: 'return_remarks' },
+    { header: 'Received By', dataKey: 'received_by_name' },
+  ];
+
+  const tableData = returns.map((r: any) => ({
+    ...r,
+    actual_return_date_formatted: r.actual_return_date ? new Date(r.actual_return_date).toLocaleDateString() : '-',
+    asset_tag: r.asset_tag || '-',
+    return_remarks: r.return_remarks || 'None',
+    received_by_name: r.received_by_name || '-',
+  }));
+
+  pdf.addTable(columns, tableData, 'Equipment Returns Log');
+  pdf.download(`equipment_returns_report_${new Date().toISOString().split('T')[0]}`);
+};
+
+export const generateFacilityEquipmentReport = async () => {
+  const data = await fetchFacilityEquipmentReportData();
+  const pdf = new PDFReportGenerator('landscape');
+
+  pdf.addHeader({
+    title: 'Facility-wise Equipment Mapping Report',
+    subtitle: 'Association between physical facility spaces and laboratory equipment',
+  });
+
+  const uniqueFacilities = new Set(data.map((d: any) => d.facility_id)).size;
+  const summary: SummaryItem[] = [
+    { label: 'Associated Equipment Items', value: data.length },
+    { label: 'Facilities with Equipment', value: uniqueFacilities },
+  ];
+
+  pdf.addSummarySection('Facility Equipment Summary', summary);
+
+  const columns: TableColumn[] = [
+    { header: 'Facility Name', dataKey: 'facility_name' },
+    { header: 'Facility Location', dataKey: 'facility_location' },
+    { header: 'Project Code', dataKey: 'project_code' },
+    { header: 'Funded By', dataKey: 'funded_by' },
+    { header: 'Equipment Name', dataKey: 'item_name' },
+    { header: 'Asset Tag', dataKey: 'asset_tag' },
+    { header: 'Classification', dataKey: 'classification' },
+    { header: 'Assigned User', dataKey: 'assigned_to_name' },
+  ];
+
+  const tableData = data.map((d: any) => ({
+    ...d,
+    project_code: d.project_code || '-',
+    funded_by: d.funded_by || '-',
+    asset_tag: d.asset_tag || '-',
+    assigned_to_name: d.assigned_to_name || 'Unassigned',
+  }));
+
+  pdf.addTable(columns, tableData, 'Facility & Equipment Mapping');
+  pdf.download(`facility_equipment_report_${new Date().toISOString().split('T')[0]}`);
 };

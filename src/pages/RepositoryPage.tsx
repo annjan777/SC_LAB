@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Upload, FileText, Search, Download, Eye, Trash2, X, FolderOpen, File, Edit, Share2, User } from 'lucide-react';
+import { Upload, FileText, Search, Download, Eye, Trash2, X, FolderOpen, File, Edit, Share2, User, Link as LinkIcon, ExternalLink } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { PageHeader, Button, FilterBar, EmptyState } from '../components/ui';
 
 interface RepositoryDocument {
   id: string;
   filename: string;
-  file_path: string;
+  file_path: string | null;
+  document_url?: string | null;
   file_type: string | null;
   category: string;
   title: string;
@@ -120,7 +122,11 @@ export default function RepositoryPage() {
     }
   };
 
-  const handleDownloadDocument = async (documentId: string, filename: string) => {
+  const handleDownloadDocument = async (documentId: string, filename: string, documentUrl?: string | null) => {
+    if (documentUrl) {
+      window.open(documentUrl, '_blank');
+      return;
+    }
     try {
       const url = `/api/repository/download/${documentId}`;
       const a = document.createElement('a');
@@ -155,67 +161,60 @@ export default function RepositoryPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">My Documents</h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">Your personal document repository and shared files</p>
-        </div>
-        <button
-          onClick={() => setShowUploadModal(true)}
-          className="px-4 py-2 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto"
-        >
-          <Upload className="w-5 h-5" />
-          <span>Upload Document</span>
-        </button>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="My Documents"
+        action={
+          <Button
+            variant="primary"
+            onClick={() => setShowUploadModal(true)}
+            leftIcon={<Upload className="w-4 h-4" />}
+          >
+            Upload Document
+          </Button>
+        }
+      />
 
       {message && (
         <div
-          className={`mb-6 p-4 rounded-lg ${
+          className={`p-4 rounded-xl border ${
             message.type === 'success'
-              ? 'bg-green-50 border border-green-200 text-green-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
+              ? 'bg-green-50 dark:bg-emerald-950/40 border-green-200 dark:border-emerald-800 text-green-800 dark:text-emerald-300'
+              : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
           }`}
         >
-          <div className="flex justify-between items-center">
+          <div className="flex justify-between items-center text-sm">
             <span>{message.text}</span>
-            <button onClick={() => setMessage(null)} className="text-gray-500 hover:text-gray-700">
+            <button onClick={() => setMessage(null)} className="text-gray-500 hover:text-gray-700 dark:hover:text-slate-200">
               <X className="w-4 h-4" />
             </button>
           </div>
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-          <input
-            type="text"
-            placeholder="Search by title, description, filename, or tags..."
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-          />
-        </div>
-
-        <div className="flex items-center justify-between mt-4">
-          <span className="text-sm text-gray-600">
+      <FilterBar
+        searchValue={searchTerm}
+        onSearchChange={(e) => setSearchTerm(e.target.value)}
+        onSearchClear={() => setSearchTerm('')}
+        searchPlaceholder="Search by title, description, filename, or tags..."
+      >
+        <div className="flex items-center justify-between w-full sm:w-auto gap-4">
+          <span className="text-xs text-gray-500 dark:text-slate-400">
             Showing <strong>{filteredDocuments.length}</strong> of <strong>{documents.length}</strong> documents
           </span>
           {selectedCategory && (
             <button
               onClick={() => setSelectedCategory(null)}
-              className="text-sm text-blue-600 hover:text-blue-800 flex items-center gap-1"
+              className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
             >
-              <X className="w-4 h-4" />
-              Clear Filter
+              <X className="w-3.5 h-3.5" />
+              Clear Category Filter
             </button>
           )}
         </div>
-      </div>
+      </FilterBar>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
         {USER_CATEGORIES.map((category) => {
           const Icon = category.icon;
           const count = getCategoryCount(category.value);
@@ -225,21 +224,21 @@ export default function RepositoryPage() {
             <button
               key={category.value}
               onClick={() => setSelectedCategory(isSelected ? null : category.value)}
-              className={`relative overflow-hidden rounded-xl shadow-sm border-2 transition-all duration-300 transform hover:scale-105 ${
+              className={`relative overflow-hidden rounded-xl shadow-sm border-2 transition-all duration-200 hover:shadow-md cursor-pointer ${
                 isSelected
-                  ? 'border-blue-500 ring-2 ring-blue-200'
-                  : 'border-gray-200 hover:border-gray-300'
+                  ? 'border-blue-500 ring-2 ring-blue-500/20'
+                  : 'border-gray-200 dark:border-slate-800 hover:border-gray-300 dark:hover:border-slate-700'
               }`}
             >
-              <div className={`bg-gradient-to-br ${category.color} p-6 text-white`}>
-                <div className="flex justify-between items-start mb-4">
-                  <Icon className="w-8 h-8" />
+              <div className={`bg-gradient-to-br ${category.color} p-5 text-white`}>
+                <div className="flex justify-between items-start mb-3">
+                  <Icon className="w-6 h-6" />
                   <div className="text-right">
-                    <div className="text-3xl font-bold">{count}</div>
-                    <div className="text-xs opacity-90">documents</div>
+                    <div className="text-2xl font-bold">{count}</div>
+                    <div className="text-[11px] opacity-85">documents</div>
                   </div>
                 </div>
-                <p className="text-sm font-medium">{category.label}</p>
+                <p className="text-xs font-semibold truncate">{category.label}</p>
               </div>
             </button>
           );
@@ -247,24 +246,18 @@ export default function RepositoryPage() {
       </div>
 
       {filteredDocuments.length === 0 ? (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-          <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No Documents Found</h3>
-          <p className="text-gray-600 mb-6">
-            {searchTerm || selectedCategory
+        <EmptyState
+          icon={FolderOpen}
+          title="No Documents Found"
+          description={
+            searchTerm || selectedCategory
               ? 'No documents match your search criteria'
-              : 'Upload your first document to get started'}
-          </p>
-          {!searchTerm && !selectedCategory && (
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
-            >
-              <Upload className="h-5 w-5" />
-              Upload Document
-            </button>
-          )}
-        </div>
+              : 'Upload your first document to get started'
+          }
+          actionText={!searchTerm && !selectedCategory ? 'Upload Document' : undefined}
+          onAction={!searchTerm && !selectedCategory ? () => setShowUploadModal(true) : undefined}
+          actionIcon={<Upload className="w-4 h-4" />}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredDocuments.map((doc) => (
@@ -285,8 +278,23 @@ export default function RepositoryPage() {
                           Shared
                         </span>
                       )}
+                      {doc.document_url && !doc.file_path && (
+                        <span className="flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                          <LinkIcon className="w-3 h-3 mr-1" />
+                          Link
+                        </span>
+                      )}
                     </div>
-                    <p className="text-sm text-gray-500 truncate">{doc.filename}</p>
+                    <p className="text-sm text-gray-500 truncate flex items-center gap-1.5">
+                      {doc.document_url && !doc.file_path ? (
+                        <>
+                          <ExternalLink className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                          <span className="truncate">{doc.document_url}</span>
+                        </>
+                      ) : (
+                        <span>{doc.filename}</span>
+                      )}
+                    </p>
                   </div>
                 </div>
 
@@ -298,7 +306,13 @@ export default function RepositoryPage() {
                   <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
                     {getCategoryLabel(doc.category)}
                   </span>
-                  <span className="text-xs text-gray-500">{formatFileSize(doc.file_size)}</span>
+                  {doc.document_url && !doc.file_path ? (
+                    <span className="text-xs text-blue-600 font-medium inline-flex items-center gap-1">
+                      <LinkIcon className="w-3 h-3" /> Web Link
+                    </span>
+                  ) : (
+                    <span className="text-xs text-gray-500">{formatFileSize(doc.file_size)}</span>
+                  )}
                 </div>
 
                 {doc.tags && doc.tags.length > 0 && (
@@ -326,16 +340,16 @@ export default function RepositoryPage() {
                     <button
                       onClick={() => handleViewDocument(doc.id)}
                       className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                      title="View"
+                      title={doc.document_url && !doc.file_path ? "Open Link" : "View"}
                     >
                       <Eye className="w-5 h-5" />
                     </button>
                     <button
-                      onClick={() => handleDownloadDocument(doc.id, doc.filename)}
+                      onClick={() => handleDownloadDocument(doc.id, doc.filename, doc.document_url)}
                       className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition"
-                      title="Download"
+                      title={doc.document_url && !doc.file_path ? "Open Link" : "Download"}
                     >
-                      <Download className="w-5 h-5" />
+                      {doc.document_url && !doc.file_path ? <ExternalLink className="w-5 h-5" /> : <Download className="w-5 h-5" />}
                     </button>
                     {doc.uploaded_by === user?.id && (
                       <>
@@ -350,7 +364,7 @@ export default function RepositoryPage() {
                           <Edit className="w-5 h-5" />
                         </button>
                         <button
-                          onClick={() => handleDeleteDocument(doc.id, doc.file_path)}
+                          onClick={() => handleDeleteDocument(doc.id, doc.file_path || '')}
                           className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
                           title="Delete"
                         >
@@ -408,7 +422,9 @@ function UploadDocumentModal({ onClose, onSuccess }: UploadDocumentModalProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [inputType, setInputType] = useState<'file' | 'link'>('file');
   const [file, setFile] = useState<File | null>(null);
+  const [documentUrl, setDocumentUrl] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -424,16 +440,24 @@ function UploadDocumentModal({ onClose, onSuccess }: UploadDocumentModalProps) {
     setUploadProgress(0);
 
     try {
-      if (!file) {
-        setError('Please select a file to upload');
-        setLoading(false);
-        return;
-      }
+      if (inputType === 'file') {
+        if (!file) {
+          setError('Please select a file to upload');
+          setLoading(false);
+          return;
+        }
 
-      if (file.size > 50 * 1024 * 1024) {
-        setError('File size must be less than 50MB');
-        setLoading(false);
-        return;
+        if (file.size > 50 * 1024 * 1024) {
+          setError('File size must be less than 50MB');
+          setLoading(false);
+          return;
+        }
+      } else {
+        if (!documentUrl.trim()) {
+          setError('Please enter a document link / URL');
+          setLoading(false);
+          return;
+        }
       }
 
       setUploadProgress(30);
@@ -444,9 +468,14 @@ function UploadDocumentModal({ onClose, onSuccess }: UploadDocumentModalProps) {
         .filter(tag => tag.length > 0);
 
       const uploadData = new FormData();
-      uploadData.append('file', file);
+      if (inputType === 'file' && file) {
+        uploadData.append('file', file);
+        uploadData.append('title', formData.title || file.name);
+      } else {
+        uploadData.append('document_url', documentUrl.trim());
+        uploadData.append('title', formData.title || 'Document Link');
+      }
       uploadData.append('category', formData.category);
-      uploadData.append('title', formData.title || file.name);
       uploadData.append('description', formData.description || '');
       uploadData.append('tags', JSON.stringify(tagsArray));
       uploadData.append('visibility', formData.visibility);
@@ -503,21 +532,77 @@ function UploadDocumentModal({ onClose, onSuccess }: UploadDocumentModalProps) {
             </div>
           )}
 
+          {/* Mode Switch: Upload File vs Document Link */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              File <span className="text-red-500">*</span>
+              Document Source <span className="text-red-500">*</span>
             </label>
-            <input
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-              disabled={loading}
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              Maximum file size: 50MB
-            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setInputType('file')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border text-sm font-semibold transition ${
+                  inputType === 'file'
+                    ? 'border-blue-600 bg-blue-50/80 text-blue-700 shadow-sm'
+                    : 'border-gray-200 hover:border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>Upload Document File</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputType('link')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border text-sm font-semibold transition ${
+                  inputType === 'link'
+                    ? 'border-blue-600 bg-blue-50/80 text-blue-700 shadow-sm'
+                    : 'border-gray-200 hover:border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <LinkIcon className="w-4 h-4" />
+                <span>Document Link / URL</span>
+              </button>
+            </div>
           </div>
+
+          {inputType === 'file' ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                File <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="file"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required={inputType === 'file'}
+                disabled={loading}
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Maximum file size: 50MB (PDF, DOCX, XLSX, etc.)
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Document Web Link / URL <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <LinkIcon className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                <input
+                  type="url"
+                  value={documentUrl}
+                  onChange={(e) => setDocumentUrl(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="https://drive.google.com/... or OneDrive / cloud link"
+                  required={inputType === 'link'}
+                  disabled={loading}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Paste the link to your cloud document instead of downloading and uploading the file.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -585,7 +670,7 @@ function UploadDocumentModal({ onClose, onSuccess }: UploadDocumentModalProps) {
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               disabled={loading}
             >
               Cancel
@@ -672,11 +757,11 @@ function EditDocumentModal({ document, onClose, onSuccess }: EditDocumentModalPr
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Filename (Read-only)
+              {document.document_url && !document.file_path ? 'Document Link (Read-only)' : 'Filename (Read-only)'}
             </label>
             <input
               type="text"
-              value={document.filename}
+              value={document.document_url && !document.file_path ? document.document_url : document.filename}
               disabled
               className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
             />
@@ -748,7 +833,7 @@ function EditDocumentModal({ document, onClose, onSuccess }: EditDocumentModalPr
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               disabled={loading}
             >
               Cancel

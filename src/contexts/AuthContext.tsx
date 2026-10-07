@@ -1,19 +1,23 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { api, authApi, setToken, getStoredToken } from '../lib/api';
 
-export type UserRole = 'admin' | 'super_admin' | 'user';
+export type UserRole = 'admin' | 'super_admin' | 'user' | 'lab_manager';
 
 export type PermissionName =
   | 'view_users' | 'manage_users' | 'manage_roles'
   | 'view_facilities' | 'create_facilities' | 'edit_facilities' | 'delete_facilities'
+  | 'book_facilities' | 'manage_facility_bookings'
   | 'view_procurement' | 'create_purchase_request' | 'approve_procurement' | 'manage_procurement'
   | 'view_leaves' | 'create_leave_request' | 'approve_leaves'
   | 'view_work' | 'create_work' | 'edit_work' | 'delete_work' | 'manage_work_cycles'
   | 'view_inventory' | 'create_inventory' | 'edit_inventory' | 'delete_inventory'
+  | 'book_equipment' | 'manage_equipment_bookings'
+  | 'request_inventory' | 'manage_inventory_requests'
   | 'view_reports' | 'generate_reports'
   | 'view_settings' | 'manage_settings'
   | 'view_notifications'
-  | 'view_repository' | 'edit_repository_all' | 'delete_repository_all' | 'share_repository_documents';
+  | 'view_repository' | 'edit_repository_all' | 'delete_repository_all' | 'share_repository_documents'
+  | 'view_projects' | 'create_projects' | 'edit_projects' | 'delete_projects' | 'add_project_achievement';
 
 export interface UserProfile {
   id: string;
@@ -271,14 +275,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const hasPermission = (permission: string) => {
+    if (profile?.user_role === 'admin' || profile?.user_role === 'super_admin') return true;
     return permissions.has(permission);
   };
 
   const hasAnyPermission = (requiredPermissions: string[]) => {
+    if (profile?.user_role === 'admin' || profile?.user_role === 'super_admin') return true;
     return requiredPermissions.some(p => permissions.has(p));
   };
 
   const hasAllPermissions = (requiredPermissions: string[]) => {
+    if (profile?.user_role === 'admin' || profile?.user_role === 'super_admin') return true;
     return requiredPermissions.every(p => permissions.has(p));
   };
 

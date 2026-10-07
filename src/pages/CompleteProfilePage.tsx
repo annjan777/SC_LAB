@@ -191,7 +191,7 @@ export default function CompleteProfilePage() {
         {/* Header Bar */}
         <div className="flex items-center justify-between pb-6 border-b border-gray-200 mb-8">
           <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-10 w-auto object-contain" />
+            <img src="/logo.png" alt="SC Lab Logo" className="brand-logo h-12 w-auto object-contain" />
             <div>
               <h1 className="text-xl font-bold text-gray-900 tracking-wide">SC Lab Portal</h1>
               <p className="text-xs text-gray-500">Profile Setup & Verification</p>

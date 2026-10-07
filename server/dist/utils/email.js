@@ -322,3 +322,93 @@ ${config.appUrl}
         return { success: false, error: err.message };
     }
 }
+export async function sendEquipmentReturnReminderEmail(params) {
+    const { to, recipientName, itemName, assetTag, dueDate, isOverdue = false } = params;
+    const config = getEmailConfig();
+    const portalUrl = `${config.appUrl}/inventory`;
+    const appName = config.appName || 'SC Lab Portal';
+    console.log(`[EQUIPMENT RETURN EMAIL] Preparing reminder to ${to} for item "${itemName}" (due: ${dueDate})`);
+    if (!config.user || !config.pass) {
+        console.warn(`\n[DEV MODE RETURN EMAIL FOR ${to}]: Item ${itemName} due on ${dueDate} (Overdue: ${isOverdue})\n`);
+        return { success: true };
+    }
+    const subject = isOverdue
+        ? `URGENT: Return Overdue — ${itemName} (${appName})`
+        : `Reminder: Equipment Return Due Today — ${itemName} (${appName})`;
+    const headline = isOverdue
+        ? `Equipment Return Is Overdue`
+        : `Equipment Return Due Today`;
+    const statusBadge = isOverdue
+        ? `<span style="display: inline-block; background-color: #fee2e2; color: #dc2626; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 8px; border-radius: 4px; margin-bottom: 8px;">Overdue Return</span>`
+        : `<span style="display: inline-block; background-color: #fef3c7; color: #d97706; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; padding: 4px 8px; border-radius: 4px; margin-bottom: 8px;">Due Today</span>`;
+    const text = `Hi ${recipientName},
+
+This is an automated notification from ${appName}.
+${isOverdue ? 'The following equipment assigned to you is OVERDUE for return:' : 'The following equipment assigned to you is DUE FOR RETURN TODAY:'}
+
+Item: ${itemName}
+${assetTag ? `Asset / Serial: ${assetTag}\n` : ''}Expected Return Date: ${dueDate}
+
+Please return this equipment to the lab coordinator or facility manager promptly so it can be inspected, logged, and made available for other researchers.
+
+Access the SC Lab portal here: ${portalUrl}
+
+Best regards,
+${appName} Inventory Team`;
+    const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e5e7eb; border-radius: 12px; background-color: #ffffff; color: #1f2937;">
+      <div style="border-bottom: 2px solid ${isOverdue ? '#dc2626' : '#f59e0b'}; padding-bottom: 12px; margin-bottom: 20px;">
+        ${statusBadge}
+        <h2 style="color: #111827; margin: 0; font-size: 20px; font-weight: 700;">${headline}</h2>
+      </div>
+
+      <p style="font-size: 15px; line-height: 1.6; color: #374151;">Hi <strong>${recipientName}</strong>,</p>
+      
+      <p style="font-size: 14px; line-height: 1.6; color: #4b5563;">
+        ${isOverdue
+        ? 'The return period for the following equipment assigned to you has expired. Please return the item to the lab as soon as possible.'
+        : 'Today is the final day of your scheduled equipment loan. Please return the item to the lab manager or coordinator before the end of the day.'}
+      </p>
+
+      <div style="background-color: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; margin: 20px 0;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+          <tr>
+            <td style="padding: 6px 0; color: #64748b; width: 140px; font-weight: 500;">Item Name:</td>
+            <td style="padding: 6px 0; color: #0f172a; font-weight: 600;">${itemName}</td>
+          </tr>
+          ${assetTag ? `<tr><td style="padding: 6px 0; color: #64748b; font-weight: 500;">Asset / Serial:</td><td style="padding: 6px 0; color: #0f172a;">${assetTag}</td></tr>` : ''}
+          <tr>
+            <td style="padding: 6px 0; color: #64748b; font-weight: 500;">Return Due Date:</td>
+            <td style="padding: 6px 0; color: ${isOverdue ? '#dc2626' : '#d97706'}; font-weight: 700;">${dueDate}</td>
+          </tr>
+        </table>
+      </div>
+
+      <div style="margin: 28px 0; text-align: center;">
+        <a href="${portalUrl}" style="background-color: #2563eb; color: #ffffff; padding: 12px 28px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 14px; display: inline-block;">
+          View in SC Lab Portal &rarr;
+        </a>
+      </div>
+
+      <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid #e5e7eb; font-size: 12px; color: #9ca3af;">
+        <p style="margin: 0;">Sent automatically by ${appName} &bull; <a href="${config.appUrl}" style="color: #6b7280;">${config.appUrl}</a></p>
+      </div>
+    </div>
+  `;
+    try {
+        const transporter = getTransporter();
+        await transporter.sendMail({
+            from: config.fromEmail,
+            to,
+            subject,
+            text,
+            html,
+        });
+        console.log(`[EQUIPMENT RETURN EMAIL] Sent successfully to ${to}`);
+        return { success: true };
+    }
+    catch (err) {
+        console.error(`[EQUIPMENT RETURN EMAIL ERROR] Failed sending to ${to}:`, err.message);
+        return { success: false, error: err.message };
+    }
+}

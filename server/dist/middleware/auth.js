@@ -15,11 +15,17 @@ export function generateRefreshToken(userId) {
 }
 export async function authenticate(req, res, next) {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    let token;
+    if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+    }
+    else if (req.query.token && typeof req.query.token === 'string') {
+        token = req.query.token;
+    }
+    if (!token) {
         return res.status(401).json({ error: 'No token provided' });
     }
     try {
-        const token = authHeader.slice(7);
         const decoded = jwt.verify(token, JWT_SECRET);
         if (decoded.purpose === 'password_reset') {
             return res.status(401).json({ error: 'Password reset token cannot be used for standard authentication' });
@@ -60,11 +66,17 @@ export async function authenticate(req, res, next) {
 }
 export async function optionalAuthenticate(req, _res, next) {
     const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer ')) {
+    let token;
+    if (authHeader?.startsWith('Bearer ')) {
+        token = authHeader.slice(7);
+    }
+    else if (req.query.token && typeof req.query.token === 'string') {
+        token = req.query.token;
+    }
+    if (!token) {
         return next();
     }
     try {
-        const token = authHeader.slice(7);
         const decoded = jwt.verify(token, JWT_SECRET);
         const profileResult = await query('SELECT id, user_role, is_active, last_password_changed_at FROM user_profiles WHERE id = $1', [decoded.userId]);
         if (profileResult.rows.length > 0 && profileResult.rows[0].is_active !== false) {
@@ -96,12 +108,39 @@ export async function authenticateResetToken(req, res, next) {
     if (!authHeader?.startsWith('Bearer ')) {
         return res.status(401).json({ error: 'No token provided' });
     }
+    const token = authHeader.slice(7);
+    // 1. Check if token matches an active reset_password_token in the database (hex token flow)
     try {
-        const token = authHeader.slice(7);
+        const userResult = await query(`SELECT u.id, u.email, u.reset_password_expires, up.user_role, up.is_active, up.last_password_changed_at
+       FROM users u
+       LEFT JOIN user_profiles up ON up.id = u.id
+       WHERE u.reset_password_token = $1`, [token]);
+        if (userResult.rows.length > 0) {
+            const user = userResult.rows[0];
+            if (user.is_active === false) {
+                return res.status(403).json({ error: 'Account has been deactivated' });
+            }
+            if (!user.reset_password_expires || new Date(user.reset_password_expires) < new Date()) {
+                return res.status(401).json({ error: 'Reset token is invalid or has expired' });
+            }
+            req.user = {
+                id: user.id,
+                email: user.email,
+                user_role: user.user_role || 'user',
+                permissions: new Set(),
+                auth_purpose: 'password_reset',
+            };
+            return next();
+        }
+    }
+    catch (dbErr) {
+        console.error('Error checking reset token in DB:', dbErr);
+    }
+    // 2. Fall back to signed JWT verification (JWT reset token or session token flow)
+    try {
         const decoded = jwt.verify(token, JWT_SECRET);
-        // Allow both standard session tokens (for logged-in users) and reset tokens
         // Fetch profile + permissions
-        const profileResult = await query('SELECT id, user_role, is_active, last_password_changed_at FROM user_profiles WHERE id = $1', [decoded.userId]);
+        const profileResult = await query('SELECT id, user_role, is_active, last_password_changed_at, require_password_change FROM user_profiles WHERE id = $1', [decoded.userId]);
         if (profileResult.rows.length === 0) {
             return res.status(401).json({ error: 'User not found' });
         }
@@ -115,11 +154,26 @@ export async function authenticateResetToken(req, res, next) {
                 return res.status(401).json({ error: 'Reset token expired due to password change' });
             }
         }
+        // If purpose is password_reset, ensure it's either an authorized first-time login require_password_change
+        // OR matches a stored reset token
+        if (decoded.purpose === 'password_reset') {
+            const userCheck = await query('SELECT reset_password_token, reset_password_expires FROM users WHERE id = $1', [decoded.userId]);
+            const storedToken = userCheck.rows[0]?.reset_password_token;
+            const expiresAt = userCheck.rows[0]?.reset_password_expires;
+            if (storedToken) {
+                if (storedToken !== token || (expiresAt && new Date(expiresAt) < new Date())) {
+                    return res.status(401).json({ error: 'Reset token is invalid or has expired' });
+                }
+            }
+            else if (!profile.require_password_change) {
+                return res.status(401).json({ error: 'Reset token has already been used or is invalid' });
+            }
+        }
         req.user = {
             id: decoded.userId,
             email: decoded.email,
             user_role: profile.user_role,
-            permissions: new Set(), // permissions not strictly needed just to change password
+            permissions: new Set(),
             auth_purpose: decoded.purpose || 'session',
         };
         next();
@@ -130,6 +184,9 @@ export async function authenticateResetToken(req, res, next) {
 }
 export function requirePermission(...perms) {
     return (req, res, next) => {
+        if (req.user?.user_role === 'super_admin' || req.user?.user_role === 'admin') {
+            return next();
+        }
         const has = perms.some(p => req.user?.permissions.has(p));
         if (!has)
             return res.status(403).json({ error: 'Insufficient permissions' });

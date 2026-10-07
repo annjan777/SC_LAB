@@ -1,7 +1,9 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { ThemeProvider } from './contexts/ThemeContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Layout from './components/Layout';
+import ErrorBoundary from './components/ErrorBoundary';
 
 import LoginPage from './pages/LoginPage';
 import AuthCallbackPage from './pages/AuthCallbackPage';
@@ -15,6 +17,7 @@ import WorkOverviewPage from './pages/WorkOverviewPage';
 import NotificationsPage from './pages/NotificationsPage';
 import RepositoryPage from './pages/RepositoryPage';
 import UsersPage from './pages/UsersPage';
+import ProjectsPage from './pages/ProjectsPage';
 
 import AdminUsersPage from './pages/admin/AdminUsersPage';
 import CompleteProfilePage from './pages/CompleteProfilePage';
@@ -48,9 +51,11 @@ function HomeRedirect() {
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Routes>
+    <ErrorBoundary>
+      <ThemeProvider>
+        <AuthProvider>
+          <Router>
+            <Routes>
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
@@ -149,6 +154,17 @@ function App() {
           />
 
           <Route
+            path="/projects"
+            element={
+              <ProtectedRoute requiredPermissions={['view_projects', 'create_projects', 'edit_projects', 'add_project_achievement']}>
+                <Layout>
+                  <ProjectsPage />
+                </Layout>
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
             path="/notifications"
             element={
               <ProtectedRoute>
@@ -239,7 +255,7 @@ function App() {
           <Route
             path="/admin/work-overview"
             element={
-              <ProtectedRoute requiredPermissions={['manage_work_cycles']}>
+              <ProtectedRoute>
                 <Layout>
                   <AdminWorkOverviewPage />
                 </Layout>
@@ -267,6 +283,8 @@ function App() {
         </Routes>
       </Router>
     </AuthProvider>
+  </ThemeProvider>
+</ErrorBoundary>
   );
 }
 

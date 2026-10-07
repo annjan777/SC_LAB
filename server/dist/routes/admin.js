@@ -6,7 +6,9 @@ import { authenticate, requirePermission } from '../middleware/auth.js';
 import { sendTempPasswordEmail, generateTempPassword } from '../utils/email.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
 import { createNotification } from '../services/notificationService.js';
+import { notifyWorkComment } from '../services/workNotificationService.js';
 import { extractIndianPhone, validateEmail } from '../utils/userValidation.js';
+import { syncOverdueMilestones } from './work.js';
 const router = Router();
 function isValidPassword(password) {
     return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
@@ -66,7 +68,7 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
        VALUES ($1, $2, $3, $4, $5, $6, true, false, NOW() + INTERVAL '24 hours')`, [userId, full_name || 'New User', cleanEmail, cleanPhone, resolvedRoleName.toLowerCase(), resolvedRoleId]);
         sendTempPasswordEmail(cleanEmail, full_name || 'New User', generatedPassword).then(emailResult => {
             if (!emailResult.success) {
-                console.log(`[DEV MODE] Password for ${cleanEmail}: ${generatedPassword}`);
+                console.warn(`[ADMIN] Failed to dispatch temporary password email to ${cleanEmail}`);
             }
         }).catch(err => console.error('Background email error:', err));
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
@@ -250,7 +252,7 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
         // Email will be sent in the background
         sendTempPasswordEmail(email, full_name || 'New User', generatedPassword).then(emailResult => {
             if (!emailResult.success) {
-                console.log(`[DEV MODE] Password for ${email}: ${generatedPassword}`);
+                console.warn(`[ADMIN] Failed to dispatch temporary password email to ${email}`);
             }
         }).catch(err => console.error('Background email error:', err));
         const profile = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
@@ -367,7 +369,6 @@ router.get('/purchase-requests', authenticate, requirePermission('view_procureme
     try {
         const role = req.user?.user_role?.toLowerCase();
         const isPrivileged = role === 'admin' || role === 'super_admin' || role === 'superadmin';
-        console.log('[DEBUG PROCUREMENT ROUTE] Hit!', { email: req.user?.email, role, isPrivileged });
         let sql = `
       SELECT pr.*,
         json_build_object(
@@ -585,9 +586,102 @@ router.get('/reports/:type', authenticate, requirePermission('view_reports'), as
                 break;
             case 'inventory':
                 result = await query(`
-          SELECT i.*, up.full_name as assigned_to_name
-          FROM inventory_items i LEFT JOIN user_profiles up ON up.id = i.assigned_to_user_id
-          ORDER BY i.item_name`);
+          SELECT i.*, f.name as facility_name, f.project_code as facility_project_code,
+                 up.full_name as assigned_to_name, up.email as assigned_to_email
+          FROM inventory_items i
+          LEFT JOIN facilities f ON f.id = i.facility_id
+          LEFT JOIN user_profiles up ON up.id = i.assigned_to_user_id
+          ORDER BY i.classification, i.item_name`);
+                break;
+            case 'inventory-requests':
+            case 'inventory-transactions':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.category, ii.classification, ii.asset_tag, ii.serial_number, ii.location,
+            ii.po_number, ii.vendor_name, ii.purchased_by,
+            f.name as facility_name,
+            req_u.full_name as requester_name, req_u.email as requester_email,
+            app_u.full_name as approver_name,
+            iss_u.full_name as issuer_name,
+            rec_u.full_name as receiver_name
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          LEFT JOIN facilities f ON f.id = ii.facility_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          LEFT JOIN user_profiles app_u ON app_u.id = ir.approved_by
+          LEFT JOIN user_profiles iss_u ON iss_u.id = ir.issued_by
+          LEFT JOIN user_profiles rec_u ON rec_u.id = ir.received_by
+          ORDER BY ir.created_at DESC`);
+                break;
+            case 'inventory-consumables':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.category, ii.classification, ii.quantity as current_stock, ii.location,
+            ii.po_number, ii.vendor_name,
+            req_u.full_name as requester_name,
+            iss_u.full_name as issuer_name
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          LEFT JOIN user_profiles iss_u ON iss_u.id = ir.issued_by
+          WHERE ii.classification = 'Consumables' OR ir.is_returnable = false
+          ORDER BY ir.issue_date DESC NULLS LAST, ir.created_at DESC`);
+                break;
+            case 'inventory-equipment':
+                result = await query(`
+          SELECT 
+            ii.*,
+            f.name as facility_name, f.project_code as facility_project_code,
+            up.full_name as assigned_to_name, up.email as assigned_to_email,
+            ir.id as active_request_id, ir.expected_return_date, ir.issue_date
+          FROM inventory_items ii
+          LEFT JOIN facilities f ON f.id = ii.facility_id
+          LEFT JOIN user_profiles up ON up.id = ii.assigned_to_user_id
+          LEFT JOIN inventory_requests ir ON ir.inventory_item_id = ii.id AND ir.status IN ('issued', 'overdue')
+          WHERE ii.classification = 'Equipment'
+          ORDER BY ii.item_name`);
+                break;
+            case 'inventory-returns':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.asset_tag, ii.serial_number, ii.classification,
+            req_u.full_name as requester_name,
+            rec_u.full_name as received_by_name
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          LEFT JOIN user_profiles rec_u ON rec_u.id = ir.received_by
+          WHERE ir.status = 'returned'
+          ORDER BY ir.actual_return_date DESC`);
+                break;
+            case 'inventory-overdue':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.asset_tag, ii.serial_number,
+            f.name as facility_name,
+            req_u.full_name as requester_name, req_u.email as requester_email
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          LEFT JOIN facilities f ON f.id = ii.facility_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          WHERE ir.is_returnable = true AND (ir.status = 'overdue' OR (ir.status = 'issued' AND ir.expected_return_date < CURRENT_DATE))
+          ORDER BY ir.expected_return_date ASC`);
+                break;
+            case 'facility-equipment':
+                result = await query(`
+          SELECT 
+            f.id as facility_id, f.name as facility_name, f.location as facility_location,
+            f.project_code, f.funded_by,
+            ii.id as item_id, ii.item_name, ii.asset_tag, ii.serial_number, ii.classification, ii.status as item_status,
+            up.full_name as assigned_to_name
+          FROM facilities f
+          JOIN inventory_items ii ON ii.facility_id = f.id
+          LEFT JOIN user_profiles up ON up.id = ii.assigned_to_user_id
+          ORDER BY f.name, ii.item_name`);
                 break;
             case 'procurement':
                 result = await query(`
@@ -647,6 +741,7 @@ router.get('/reports/:type', authenticate, requirePermission('view_reports'), as
 // --- Admin Work Overview ---
 router.get('/work/overview', authenticate, requirePermission('view_work'), async (req, res) => {
     try {
+        await syncOverdueMilestones();
         let sql = `
       SELECT
         aw.id AS work_id,
@@ -655,10 +750,28 @@ router.get('/work/overview', authenticate, requirePermission('view_work'), async
         up.department,
         (SELECT completion_percentage FROM progress_updates
          WHERE work_id = aw.id ORDER BY update_date DESC, created_at DESC LIMIT 1) as completion_percentage,
-        (SELECT status FROM progress_updates
-         WHERE work_id = aw.id ORDER BY update_date DESC, created_at DESC LIMIT 1) as latest_status,
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM work_milestones wm
+            WHERE wm.work_id = aw.id
+              AND wm.status = 'delayed'
+              AND (wm.justification_status IS NULL OR wm.justification_status != 'approved')
+          ) THEN 'delayed'
+          ELSE COALESCE(
+            (SELECT status FROM progress_updates WHERE work_id = aw.id ORDER BY update_date DESC, created_at DESC LIMIT 1),
+            'not_started'
+          )
+        END as latest_status,
+        (
+          SELECT COUNT(*)::int FROM work_milestones wm
+          WHERE wm.work_id = aw.id
+            AND wm.status = 'delayed'
+            AND (wm.justification_status IS NULL OR wm.justification_status != 'approved')
+        ) as unapproved_delayed_milestones_count,
         (SELECT COUNT(*) FROM work_problems
          WHERE work_id = aw.id AND status IN ('open','in_progress'))::int as open_problems_count,
+        (SELECT COUNT(*)::int FROM milestone_change_requests WHERE work_id = aw.id AND status = 'pending') AS pending_milestone_requests_count,
+        (SELECT COUNT(*)::int FROM work_dependencies wd JOIN assigned_works dep ON dep.id = wd.depends_on_work_id WHERE wd.work_id = aw.id AND dep.priority = 'code_red' AND dep.admin_status NOT IN ('completed', 'approved')) AS blocked_by_code_red_count,
         (SELECT MAX(created_at) FROM progress_updates WHERE work_id = aw.id) as last_updated
       FROM assigned_works aw
       LEFT JOIN user_profiles up ON up.id = aw.user_id`;
@@ -683,12 +796,17 @@ router.get('/work/overview', authenticate, requirePermission('view_work'), async
                 ...row,
                 days_since_update: daysSinceUpdate,
                 completion_percentage: Number(row.completion_percentage || 0),
+                pending_milestone_requests_count: Number(row.pending_milestone_requests_count || 0),
+                blocked_by_code_red_count: Number(row.blocked_by_code_red_count || 0),
+                unapproved_delayed_milestones_count: Number(row.unapproved_delayed_milestones_count || 0),
             };
         });
         const usersResult = await query('SELECT id, full_name, department FROM user_profiles ORDER BY full_name');
         const usersWithWork = new Set(workData.map((row) => row.user_id));
         const usersWithoutWork = usersResult.rows.filter((user) => !usersWithWork.has(user.id));
-        const myWorkRows = workData.filter((row) => row.user_id === req.user.id);
+        const myProfile = await query('SELECT full_name FROM user_profiles WHERE id = $1', [req.user.id]);
+        const myFullName = myProfile.rows[0]?.full_name;
+        const myWorkRows = workData.filter((row) => row.user_id === req.user.id || (myFullName && row.assigned_by === myFullName));
         const myWorkSummary = {
             totalWorks: myWorkRows.length,
             avgCompletion: myWorkRows.length
@@ -721,17 +839,42 @@ router.get('/work/overview', authenticate, requirePermission('view_work'), async
                 openSupportRequests[row.support_required_from] = row.count;
             }
         }
+        // Pending milestone change requests for admin review
+        const pendingMilestoneRequestsResult = await query(`SELECT mcr.*,
+              aw.work_title,
+              aw.issue_key,
+              aw.project_name,
+              up.full_name as requester_name,
+              up.email as requester_email,
+              up.department as requester_department
+       FROM milestone_change_requests mcr
+       JOIN assigned_works aw ON aw.id = mcr.work_id
+       JOIN user_profiles up ON up.id = mcr.requested_by
+       WHERE mcr.status = 'pending'
+       ORDER BY mcr.created_at ASC`);
+        // Active Code-Red works
+        const activeCodeRedResult = await query(`SELECT aw.id, aw.issue_key, aw.work_title, aw.priority, aw.issue_type,
+              aw.code_red_activated_at, aw.start_date, aw.end_date, aw.admin_status,
+              up.full_name as user_name, up.email as user_email
+       FROM assigned_works aw
+       JOIN user_profiles up ON up.id = aw.user_id
+       WHERE aw.priority = 'code_red' AND aw.admin_status NOT IN ('completed', 'approved')
+       ORDER BY aw.code_red_activated_at DESC`);
         res.json({
             workData,
             usersWithoutWork,
             myWorkSummary,
+            pendingMilestoneRequests: pendingMilestoneRequestsResult.rows,
+            activeCodeRedWorks: activeCodeRedResult.rows,
             statistics: {
                 totalUsers: usersResult.rows.length,
                 usersWithWork: usersWithWork.size,
                 usersWithoutWork: usersWithoutWork.length,
-                delayedWorkCount: workData.filter((row) => row.latest_status === 'delayed').length,
+                delayedWorkCount: workData.filter((row) => row.latest_status === 'delayed' || Number(row.unapproved_delayed_milestones_count || 0) > 0).length,
                 highImpactProblemsCount: highImpactProblemsResult.rows[0]?.count || 0,
                 openSupportRequests,
+                codeRedCount: activeCodeRedResult.rows.length,
+                pendingMilestoneRequestsCount: pendingMilestoneRequestsResult.rows.length,
             },
         });
     }
@@ -765,18 +908,8 @@ router.post('/work/:id/comments', authenticate, requirePermission('create_work')
         const result = await query(`INSERT INTO admin_comments (work_id, comment, commented_by)
        VALUES ($1,$2,$3)
        RETURNING *`, [req.params.id, comment, req.user.id]);
-        const workResult = await query('SELECT user_id, project_name FROM assigned_works WHERE id = $1', [req.params.id]);
-        if (workResult.rows[0] && workResult.rows[0].user_id !== req.user.id) {
-            await createNotification({
-                userId: workResult.rows[0].user_id,
-                type: 'work',
-                title: 'New Comment on Your Work',
-                message: `An admin commented on your work: ${workResult.rows[0].project_name}`,
-                relatedEntityType: 'assigned_works',
-                relatedEntityId: req.params.id,
-                actionUrl: `/work-overview`
-            });
-        }
+        // Send notifications to assignee, supervisor, and admins
+        await notifyWorkComment(req.params.id, req.user.id, comment);
         res.status(201).json(result.rows[0]);
     }
     catch (err) {

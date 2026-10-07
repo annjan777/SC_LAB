@@ -2,6 +2,20 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { Calendar, Check, X, AlertCircle, Plus, Edit2, Trash2, Search } from 'lucide-react';
+import {
+  PageHeader,
+  Button,
+  Select,
+  TableContainer,
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  StatusBadge,
+  EmptyState,
+} from '../../components/ui';
 
 interface LeaveRequest {
   id: string;
@@ -191,40 +205,35 @@ export default function AdminLeavesPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">
-            {hasPermission('approve_leaves') ? 'Leave Approvals' : 'Leave Requests'}
-          </h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">
-            {hasPermission('approve_leaves') ? 'Review and approve leave requests' : 'Submit and track your leave applications'}
-          </p>
-        </div>
-        {hasPermission('create_leave_request') && (
-          <button
-            onClick={() => {
-              if (showForm) {
-                setShowForm(false);
-                setEditingRequest(null);
-              } else {
-                setEditingRequest(null);
-                setFormData({
-                  leave_type: 'casual',
-                  from_date: '',
-                  to_date: '',
-                  reason: '',
-                });
-                setShowForm(true);
-              }
-            }}
-            className="flex items-center justify-center space-x-2 px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition w-full sm:w-auto"
-          >
-            {showForm ? <X className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-            <span>{showForm ? 'Cancel' : 'New Request'}</span>
-          </button>
-        )}
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title={hasPermission('approve_leaves') ? 'Leave Approvals' : 'Leave Requests'}
+        action={
+          hasPermission('create_leave_request') ? (
+            <Button
+              variant={showForm ? 'secondary' : 'primary'}
+              onClick={() => {
+                if (showForm) {
+                  setShowForm(false);
+                  setEditingRequest(null);
+                } else {
+                  setEditingRequest(null);
+                  setFormData({
+                    leave_type: 'casual',
+                    from_date: '',
+                    to_date: '',
+                    reason: '',
+                  });
+                  setShowForm(true);
+                }
+              }}
+              leftIcon={showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+            >
+              {showForm ? 'Cancel' : 'New Request'}
+            </Button>
+          ) : undefined
+        }
+      />
 
       {error && (
         <div className="mb-6 bg-red-50 border border-red-200 rounded-xl p-4 flex items-start space-x-3">
@@ -495,7 +504,7 @@ export default function AdminLeavesPage() {
                   setSelectedRequest(null);
                   setRemarks('');
                 }}
-                className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                className="px-4 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               >
                 Cancel
               </button>
@@ -526,7 +535,7 @@ export default function AdminLeavesPage() {
                   setShowDeleteModal(false);
                   setRequestToDelete(null);
                 }}
-                className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               >
                 Cancel
               </button>
@@ -604,7 +613,7 @@ export default function AdminLeavesPage() {
                     setShowForm(false);
                     setEditingRequest(null);
                   }}
-                  className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition"
+                  className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
                 >
                   Cancel
                 </button>

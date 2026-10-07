@@ -21,7 +21,7 @@ export async function initializeSuperAdmin(): Promise<void> {
         AND p.name IN (
           'create_leave_request', 
           'create_purchase_request', 
-          'create_work', 'edit_work', 'view_work', 
+          'create_work', 'view_work', 
           'view_inventory', 'create_inventory', 'edit_inventory', 
           'view_settings', 
           'view_notifications', 'view_facilities'

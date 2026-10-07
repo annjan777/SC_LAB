@@ -17,11 +17,15 @@ import { createCrudRouter } from './routes/crud.js';
 import notificationRoutes from './routes/notifications.js';
 import repositoryRoutes from './routes/repository.js';
 import facilitiesRoutes from './routes/facilities.js';
+import equipmentBookingRoutes from './routes/equipmentBookings.js';
+import inventoryRequestRoutes from './routes/inventoryRequests.js';
 import settingsRoutes from './routes/settings.js';
 import dashboardRoutes from './routes/dashboard.js';
 import adminRoutes from './routes/admin.js';
 import workRoutes from './routes/work.js';
 import backupRoutes from './routes/backup.js';
+import dailyTodoRoutes from './routes/dailyTodos.js';
+import projectRoutes from './routes/projects.js';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { progressiveLoginLimiter } from './middleware/progressiveRateLimiter.js';
@@ -92,12 +96,15 @@ app.use('/api/users', userRoutes);
 app.use('/api/expertise', expertiseRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/repository', repositoryRoutes);
+app.use('/api/admin/repository', repositoryRoutes);
 app.use('/api/facilities', facilitiesRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/work', workRoutes);
 app.use('/api/admin/backup', backupRoutes);
+app.use('/api/daily-todos', dailyTodoRoutes);
+app.use('/api/projects', projectRoutes);
 // /api/admin/roles → CRUD on roles table
 app.get('/api/admin/roles', authenticate, requirePermission('manage_roles'), async (_req, res) => {
     const roles = await dbQuery('SELECT * FROM roles ORDER BY created_at');
@@ -168,7 +175,8 @@ app.use('/api/admin/leave-requests', createCrudRouter({
 app.use('/api/admin/repository', repositoryRoutes);
 // CRUD routes for standard entities.
 // Permission names below map to the rows seeded into the `permissions` table
-// (server/schema.sql) and mirror what used to be enforced via Supabase RLS policies.
+app.use('/api/inventory/requests', inventoryRequestRoutes);
+app.use('/api/inventory', equipmentBookingRoutes);
 app.use('/api/inventory', createCrudRouter({
     table: 'inventory_items',
     defaultOrder: 'created_at',
@@ -313,12 +321,31 @@ import { initializeSuperAdmin } from './scripts/initAdmin.js';
 import { ensureOperationalSchema } from './scripts/ensureOperationalSchema.js';
 import { verifyEmailTransport } from './utils/email.js';
 import { startSkillReminderCron } from './services/skillReminderService.js';
+import { startEquipmentReturnReminderCron } from './services/equipmentReturnReminderService.js';
+import { syncOverdueMilestones } from './routes/work.js';
 app.listen(PORT, '0.0.0.0', async () => {
     console.log(`SC Lab Server running on port ${PORT}`);
     await verifyEmailTransport().catch(err => {
         console.error('Email transport verification failed:', err);
     });
-    await ensureOperationalSchema();
-    await initializeSuperAdmin();
+    try {
+        await ensureOperationalSchema();
+        await initializeSuperAdmin();
+    }
+    catch (bootErr) {
+        console.error('CRITICAL: Server boot migration/initialization failed:', bootErr);
+        process.exit(1);
+    }
     startSkillReminderCron();
+    startEquipmentReturnReminderCron();
+    // Run initial overdue milestone check to automatically flag milestones past target date as delayed
+    syncOverdueMilestones().catch(err => {
+        console.error('Initial overdue milestones sync failed:', err);
+    });
+    // Check periodically every 60 seconds
+    setInterval(() => {
+        syncOverdueMilestones().catch(err => {
+            console.error('Interval overdue milestones sync failed:', err);
+        });
+    }, 60 * 1000);
 });

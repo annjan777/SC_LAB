@@ -103,12 +103,26 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
 // PUT /api/users/:id
 router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (req: Request, res: Response) => {
   try {
+    const isCallerAdmin = req.user!.user_role === 'admin' || req.user!.user_role === 'super_admin';
+    const isOwner = req.user!.id === req.params.id;
+
     // Users can update their own profile; admins can update anyone
-    if (req.user!.id !== req.params.id && req.user!.user_role !== 'admin' && req.user!.user_role !== 'super_admin') {
+    if (!isOwner && !isCallerAdmin) {
       return res.status(403).json({ error: 'Forbidden' });
     }
 
     const fields = req.body;
+
+    // If caller is admin updating another user, prevent regular admin from modifying a super_admin
+    if (isCallerAdmin && !isOwner) {
+      const targetUser = await query('SELECT user_role FROM user_profiles WHERE id = $1', [req.params.id]);
+      if (targetUser.rows.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      if (targetUser.rows[0].user_role === 'super_admin' && req.user!.user_role !== 'super_admin') {
+        return res.status(403).json({ error: 'Only super administrators can modify super admin accounts' });
+      }
+    }
 
     if (fields.phone) {
       const phoneCheck = extractIndianPhone(fields.phone, false);
@@ -136,11 +150,36 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
       fields.reporting_manager = fields.supervisor;
     }
 
-    // Only admin/super_admin can change user_role and is_active
-    if (req.user!.user_role !== 'admin' && req.user!.user_role !== 'super_admin') {
+    // Security & RBAC: Strip all privileged / system-controlled fields for non-admin callers
+    if (!isCallerAdmin) {
+      delete fields.role_id;
       delete fields.user_role;
       delete fields.is_active;
+      delete fields.require_password_change;
+      delete fields.is_profile_completed;
+      delete fields.temp_password_expires_at;
+      delete fields.last_password_changed_at;
+    } else {
+      // Admin role modification: validate role_id against database and synchronize user_role
+      if (fields.role_id) {
+        const roleCheck = await query('SELECT id, name FROM roles WHERE id = $1', [fields.role_id]);
+        if (roleCheck.rows.length === 0) {
+          return res.status(400).json({ error: 'Invalid role_id: role does not exist in system' });
+        }
+        fields.user_role = roleCheck.rows[0].name.toLowerCase();
+      } else if (fields.user_role) {
+        const roleCheck = await query('SELECT id, name FROM roles WHERE LOWER(name) = LOWER($1)', [fields.user_role]);
+        if (roleCheck.rows.length > 0) {
+          fields.role_id = roleCheck.rows[0].id;
+          fields.user_role = roleCheck.rows[0].name.toLowerCase();
+        }
+      }
+      // Non-super_admin cannot grant super_admin role
+      if (fields.user_role === 'super_admin' && req.user!.user_role !== 'super_admin') {
+        return res.status(403).json({ error: 'Only super administrators can assign the super admin role' });
+      }
     }
+
     delete fields.id;
     delete fields.created_at;
 
@@ -178,10 +217,24 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
 
 router.delete('/:id', authenticate, requirePermission('manage_users'), async (req: Request, res: Response) => {
   try {
-    await transaction(async (client) => {
-      const userId = req.params.id;
+    const userId = req.params.id;
 
-      // Nullify references where we want to preserve the record but un-link the user
+    // Guard: Prevent administrators from deleting their own account
+    if (req.user!.id === userId) {
+      return res.status(400).json({ error: 'Administrators cannot delete their own account' });
+    }
+
+    // Guard: Prevent non-super_admin from deleting super_admin
+    const targetCheck = await query('SELECT user_role FROM user_profiles WHERE id = $1', [userId]);
+    if (targetCheck.rows.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    if (targetCheck.rows[0].user_role === 'super_admin' && req.user!.user_role !== 'super_admin') {
+      return res.status(403).json({ error: 'Only super administrators can delete super admin accounts' });
+    }
+
+    await transaction(async (client) => {
+      // Nullify references where we want to preserve the historical record but un-link the deleted user
       await client.query('UPDATE user_permissions SET granted_by = NULL WHERE granted_by = $1', [userId]);
       await client.query('UPDATE work_cycles SET created_by = NULL WHERE created_by = $1', [userId]);
 
@@ -190,6 +243,10 @@ router.delete('/:id', authenticate, requirePermission('manage_users'), async (re
       await client.query('DELETE FROM purchase_requests WHERE requested_by = $1', [userId]);
       await client.query('UPDATE leave_requests SET approved_by = NULL WHERE approved_by = $1', [userId]);
       await client.query('DELETE FROM leave_requests WHERE requested_by = $1', [userId]);
+
+      // Nullify reviewer foreign keys on milestone justification reviews and milestone change request reviews
+      await client.query('UPDATE work_milestones SET justification_reviewed_by = NULL WHERE justification_reviewed_by = $1', [userId]);
+      await client.query('UPDATE milestone_change_requests SET reviewed_by = NULL WHERE reviewed_by = $1', [userId]);
 
       // Delete remaining user-owned records
       await client.query('DELETE FROM admin_comments WHERE commented_by = $1', [userId]);

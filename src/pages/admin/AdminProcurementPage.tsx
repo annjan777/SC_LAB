@@ -2,6 +2,20 @@ import { useEffect, useState, FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { ShoppingCart, Check, X, Package, Truck, FileText, AlertCircle, Eye, ExternalLink, Boxes, Hash, Clock, Calendar, IndianRupee, User, Plus, Filter, Search } from 'lucide-react';
+import {
+  PageHeader,
+  Button,
+  Select,
+  TableContainer,
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  StatusBadge,
+  EmptyState,
+} from '../../components/ui';
 
 interface PurchaseRequest {
   id: string;
@@ -315,24 +329,23 @@ export default function AdminProcurementPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Procurement Management</h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">Review and manage purchase requests</p>
-        </div>
-        <button
-          onClick={() => {
-            setShowCreateForm(!showCreateForm);
-            setError('');
-            setSuccess('');
-          }}
-          className="px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2 transition font-medium shadow-sm w-full sm:w-auto"
-        >
-          <Plus className="w-5 h-5" />
-          <span>New Purchase Request</span>
-        </button>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Procurement Management"
+        action={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setShowCreateForm(!showCreateForm);
+              setError('');
+              setSuccess('');
+            }}
+            leftIcon={<Plus className="w-4 h-4" />}
+          >
+            New Purchase Request
+          </Button>
+        }
+      />
 
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
@@ -523,7 +536,7 @@ export default function AdminProcurementPage() {
                     project_code: '',
                   });
                 }}
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium transition"
+                className="px-6 py-2 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
               >
                 Cancel
               </button>
@@ -820,7 +833,7 @@ export default function AdminProcurementPage() {
                   setSelectedRequest(null);
                   setRejectionReason('');
                 }}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 font-medium"
+                className="flex-1 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
               >
                 Cancel
               </button>
@@ -942,7 +955,7 @@ export default function AdminProcurementPage() {
                     setSelectedRequest(null);
                     resetProcurementDetails();
                   }}
-                  className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 font-medium"
+                  className="flex-1 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
                 >
                   Cancel
                 </button>
@@ -986,7 +999,7 @@ export default function AdminProcurementPage() {
                   setSelectedRequest(null);
                   setNewStatus('');
                 }}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 font-medium"
+                className="flex-1 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
               >
                 Cancel
               </button>

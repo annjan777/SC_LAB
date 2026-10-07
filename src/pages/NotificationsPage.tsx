@@ -3,6 +3,7 @@ import { Bell, Check, Archive, Trash2, Filter, ExternalLink } from 'lucide-react
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { PageHeader, Button, Select, EmptyState } from '../components/ui';
 
 interface Notification {
   id: string;
@@ -202,6 +203,18 @@ export default function NotificationsPage() {
         return <span className={iconClass}>🆘</span>;
       case 'progress_updated':
         return <span className={iconClass}>📊</span>;
+      case 'inventory_return_due':
+      case 'inventory_return_overdue':
+        return <span className={iconClass}>⏰</span>;
+      case 'inventory_item_issued':
+      case 'inventory_item_assigned':
+        return <span className={iconClass}>📦</span>;
+      case 'inventory_request_approved':
+        return <span className={iconClass}>✅</span>;
+      case 'inventory_request_rejected':
+        return <span className={iconClass}>❌</span>;
+      case 'inventory_request_created':
+        return <span className={iconClass}>📝</span>;
       default:
         return <Bell className="w-6 h-6 text-gray-400" />;
     }
@@ -210,25 +223,22 @@ export default function NotificationsPage() {
   const totalPages = Math.ceil(totalCount / itemsPerPage);
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-2">Notifications</h1>
-        <p className="text-gray-600">Stay updated with all your activities</p>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader title="Notifications" />
 
-      <div className="bg-white rounded-lg shadow">
-        <div className="border-b border-gray-200">
-          <div className="flex items-center justify-between p-4">
-            <div className="flex gap-2">
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 transition-colors">
+        <div className="border-b border-gray-200 dark:border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 gap-3">
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => {
                   setActiveTab('all');
                   setCurrentPage(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`h-9 px-3.5 rounded-lg font-semibold text-xs transition-all ${
                   activeTab === 'all'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800'
+                    : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 border border-transparent'
                 }`}
               >
                 All
@@ -238,10 +248,10 @@ export default function NotificationsPage() {
                   setActiveTab('unread');
                   setCurrentPage(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`h-9 px-3.5 rounded-lg font-semibold text-xs transition-all ${
                   activeTab === 'unread'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800'
+                    : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 border border-transparent'
                 }`}
               >
                 Unread
@@ -251,10 +261,10 @@ export default function NotificationsPage() {
                   setActiveTab('read');
                   setCurrentPage(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`h-9 px-3.5 rounded-lg font-semibold text-xs transition-all ${
                   activeTab === 'read'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800'
+                    : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 border border-transparent'
                 }`}
               >
                 Read
@@ -264,75 +274,79 @@ export default function NotificationsPage() {
                   setActiveTab('archived');
                   setCurrentPage(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                className={`h-9 px-3.5 rounded-lg font-semibold text-xs transition-all ${
                   activeTab === 'archived'
-                    ? 'bg-blue-100 text-blue-700'
-                    : 'text-gray-600 hover:bg-gray-100'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/80 dark:border-blue-800'
+                    : 'text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 border border-transparent'
                 }`}
               >
                 Archived
               </button>
             </div>
 
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4 text-gray-400" />
-              <select
+            <div className="w-full sm:w-56">
+              <Select
                 value={filterType}
                 onChange={(e) => {
                   setFilterType(e.target.value);
                   setCurrentPage(1);
                 }}
-                className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm"
               >
                 <option value="all">All Types</option>
                 <option value="purchase_request_new">Purchase Requests</option>
                 <option value="leave_request_new">Leave Requests</option>
                 <option value="work_assigned">Work Assignments</option>
+                <option value="work_comment">Work Comments</option>
+                <option value="work">Work Updates</option>
+                <option value="inventory_return_due">Return Reminders (Due/Overdue)</option>
+                <option value="inventory_item_issued">Equipment Issuances</option>
                 <option value="problem_reported">Problem Reports</option>
                 <option value="support_requested">Support Requests</option>
-              </select>
+              </Select>
             </div>
           </div>
 
           {selectedIds.size > 0 && (
-            <div className="px-4 py-3 bg-blue-50 border-t border-blue-100 flex items-center justify-between">
-              <span className="text-sm text-blue-900">
+            <div className="px-4 py-3 bg-blue-50 dark:bg-blue-950/40 border-t border-blue-100 dark:border-blue-900/50 flex items-center justify-between">
+              <span className="text-sm font-medium text-blue-900 dark:text-blue-200">
                 {selectedIds.size} notification{selectedIds.size !== 1 ? 's' : ''} selected
               </span>
               <div className="flex gap-2">
-                <button
+                <Button
+                  size="sm"
+                  variant="primary"
                   onClick={markSelectedAsRead}
-                  className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2"
+                  leftIcon={<Check className="w-4 h-4" />}
                 >
-                  <Check className="w-4 h-4" />
                   Mark as Read
-                </button>
-                <button
+                </Button>
+                <Button
+                  size="sm"
+                  variant="secondary"
                   onClick={archiveSelected}
-                  className="px-3 py-1.5 text-sm bg-gray-600 text-white rounded-lg hover:bg-gray-700 flex items-center gap-2"
+                  leftIcon={<Archive className="w-4 h-4" />}
                 >
-                  <Archive className="w-4 h-4" />
                   Archive
-                </button>
+                </Button>
               </div>
             </div>
           )}
         </div>
 
         {loading ? (
-          <div className="p-12 text-center text-gray-500">
+          <div className="p-12 text-center text-gray-500 dark:text-slate-400">
             Loading notifications...
           </div>
         ) : notifications.length === 0 ? (
-          <div className="p-12 text-center">
-            <Bell className="w-16 h-16 mx-auto mb-4 text-gray-300" />
-            <h3 className="text-lg font-medium text-gray-900 mb-1">No notifications</h3>
-            <p className="text-gray-500">
-              {activeTab === 'archived'
+          <EmptyState
+            icon={Bell}
+            title="No notifications"
+            description={
+              activeTab === 'archived'
                 ? "You haven't archived any notifications"
-                : "You're all caught up!"}
-            </p>
-          </div>
+                : "You're all caught up!"
+            }
+          />
         ) : (
           <>
             <div className="divide-y divide-gray-100">

@@ -70,7 +70,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="flex justify-center mb-6">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-40" />
+            <img src="/logo.png" alt="SC Lab Logo" className="brand-logo h-36 max-h-40 w-auto object-contain" />
           </div>
 
           <p className="text-center text-gray-600 mb-8">Sign in to access lab management system</p>
@@ -205,7 +205,7 @@ export default function LoginPage() {
                         setResetEmail('');
                       }}
                       disabled={resetLoading}
-                      className="flex-1 px-6 py-3 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+                      className="flex-1 px-6 py-3 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition disabled:opacity-50"
                     >
                       Cancel
                     </button>

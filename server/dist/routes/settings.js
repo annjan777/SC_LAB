@@ -3,7 +3,7 @@ import { query } from '../config/database.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 const router = Router();
 // --- ROLES ---
-router.get('/roles', authenticate, async (_req, res) => {
+router.get('/roles', authenticate, requirePermission('manage_roles', 'manage_settings'), async (_req, res) => {
     try {
         const result = await query('SELECT * FROM roles ORDER BY created_at');
         res.json(result.rows);
@@ -38,7 +38,7 @@ router.delete('/roles/:id', authenticate, requirePermission('manage_roles', 'man
     }
 });
 // --- PERMISSIONS ---
-router.get('/permissions', authenticate, async (_req, res) => {
+router.get('/permissions', authenticate, requirePermission('manage_roles', 'manage_settings'), async (_req, res) => {
     try {
         const result = await query('SELECT * FROM permissions ORDER BY category, display_name');
         res.json(result.rows);
@@ -49,7 +49,7 @@ router.get('/permissions', authenticate, async (_req, res) => {
     }
 });
 // --- ROLE PERMISSIONS ---
-router.get('/role-permissions/:roleId', authenticate, async (req, res) => {
+router.get('/role-permissions/:roleId', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req, res) => {
     try {
         const result = await query(`SELECT rp.*, p.name, p.display_name, p.category
        FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id
@@ -76,7 +76,7 @@ router.put('/role-permissions/:roleId', authenticate, requirePermission('manage_
     }
 });
 // --- USER PERMISSIONS (direct grants) ---
-router.get('/user-permissions/:userId', authenticate, async (req, res) => {
+router.get('/user-permissions/:userId', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req, res) => {
     try {
         const result = await query(`SELECT up.*, p.name, p.display_name, p.category
        FROM user_permissions up JOIN permissions p ON p.id = up.permission_id
