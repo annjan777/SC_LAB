@@ -6,6 +6,7 @@ import { Save, Plus, X, User, Briefcase, Phone, Award, Lock, Eye, EyeOff, Code, 
 import AutocompleteInput from '../components/AutocompleteInput';
 import { calculateTenure } from '../utils/tenureUtils';
 import { PageHeader, Button } from '../components/ui';
+import AiConnectionsCard from '../components/AiConnectionsCard';
 
 interface UserSkill {
   id: string;
@@ -1192,6 +1193,8 @@ export default function ProfilePage() {
             </div>
           </form>
         </div>
+
+        <AiConnectionsCard />
       </div>
     </div>
   );

@@ -48,6 +48,12 @@ export const progressiveLoginLimiter = (req: Request, res: Response, next: NextF
   next();
 };
 
+/** Milliseconds until this IP may try to log in again (0 when not blocked). */
+export function getLoginBlockRemainingMs(ip: string): number {
+  const state = tracker.get(ip);
+  return state && state.blockedUntil > Date.now() ? state.blockedUntil - Date.now() : 0;
+}
+
 export function recordFailedLogin(ip: string) {
   // Prevent unbounded memory growth by evicting oldest (first) entry if at limit
   if (tracker.size >= MAX_TRACKER_SIZE && !tracker.has(ip)) {

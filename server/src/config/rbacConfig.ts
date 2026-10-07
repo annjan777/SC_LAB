@@ -121,6 +121,8 @@ export const SC_LAB_RBAC_CONFIG: RbacConfig = {
         '/api/repository/**',
         '/api/daily-todos',
         '/api/daily-todos/**',
+        '/api/mcp',
+        '/api/mcp/**',
       ],
       action: ['read', 'write', 'delete'],
       effect: 'allow',

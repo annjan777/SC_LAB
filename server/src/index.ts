@@ -35,6 +35,8 @@ import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import { progressiveLoginLimiter } from './middleware/progressiveRateLimiter.js';
 import { xssSanitizer } from './middleware/xssSanitizer.js';
+import { mountMcp } from './mcp/index.js';
+import { ensureMcpSchema } from './mcp/store.js';
 
 import fs from 'fs';
 import { query } from './config/database.js';
@@ -75,6 +77,11 @@ const authLimiter = rateLimit({
 const corsOrigin = process.env.CORS_ORIGIN || '*';
 app.use(cors({ origin: corsOrigin === '*' && process.env.NODE_ENV === 'production' ? false : corsOrigin }));
 app.use(express.json({ limit: '10mb' }));
+
+// AI connector (MCP). Mounted before the sanitizer: its tools call the /api routes below,
+// which sanitize their own input, and before the dev redirect so /authorize is not sent to Vite.
+mountMcp(app);
+
 app.use(xssSanitizer);
 app.use(express.urlencoded({ extended: true }));
 
@@ -444,6 +451,7 @@ async function start() {
     try {
       await ensureOperationalSchema();
       await initializeSuperAdmin();
+      await ensureMcpSchema();
       break;
     } catch (bootErr: any) {
       const transient = ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', '57P03'].includes(bootErr?.code);
