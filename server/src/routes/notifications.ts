@@ -32,6 +32,13 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
+    if (action_url && !/^\/(?!\/)/.test(String(action_url)) && !/^https?:\/\//i.test(String(action_url))) {
+      return res.status(400).json({ error: 'action_url must be an in-app path (/...) or an http(s) link' });
+    }
+    if (!title || !String(title).trim()) {
+      return res.status(400).json({ error: 'Notification title is required' });
+    }
+
     const targetUserId = user_id || req.user!.id;
     
     const result = await query(
@@ -127,9 +134,12 @@ router.post('/broadcast', authenticate, async (req: Request, res: Response) => {
 // PUT /api/notifications/:id
 router.put('/:id', authenticate, async (req: Request, res: Response) => {
   try {
-    const fields = req.body;
+    // Only the read/archive state of your own notification can change (never its owner, title or text).
+    const ALLOWED = ['is_read', 'is_archived', 'read_at'];
+    const fields: Record<string, any> = {};
+    for (const k of ALLOWED) if (req.body?.[k] !== undefined) fields[k] = req.body[k];
     const rawKeys = Object.keys(fields);
-    if (rawKeys.length === 0) return res.status(400).json({ error: 'No fields to update' });
+    if (rawKeys.length === 0) return res.status(400).json({ error: 'Only is_read / is_archived can be updated' });
     const safeKeys = rawKeys.map(k => sanitizeIdentifier(k));
     const setClause = safeKeys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
     const values = rawKeys.map(k => fields[k]);
@@ -140,6 +150,7 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
       `UPDATE notifications SET ${setClause} WHERE id = $${values.length - 1} AND user_id = $${values.length} RETURNING *`,
       values
     );
+    if (result.rows.length === 0) return res.status(404).json({ error: 'Notification not found' });
     res.json(result.rows[0]);
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });

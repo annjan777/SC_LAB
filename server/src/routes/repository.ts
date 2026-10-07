@@ -254,7 +254,9 @@ router.post('/upload', authenticate, upload.single('file'), async (req: Request,
         req.user!.id, fileSize,
         normalizeVisibilityInput(visibility) || 'all_members',
         shared_with_users ? (typeof shared_with_users === 'string' ? JSON.parse(shared_with_users) : shared_with_users) : [],
-        is_admin_only_category === 'true' || is_admin_only_category === true,
+        // Only administrators may file documents into admin-only categories
+        (['admin', 'super_admin'].includes(req.user!.user_role) || req.user!.permissions.has('edit_repository_all')) &&
+          (is_admin_only_category === 'true' || is_admin_only_category === true),
       ]
     );
     res.status(201).json(mapDocumentForResponse(result.rows[0]));

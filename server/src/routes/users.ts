@@ -6,6 +6,7 @@ import { updateUserProfileSchema } from '../validators/userValidator.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
 import { extractIndianPhone, validateEmail } from '../utils/userValidation.js';
 import { checkUserNeedsSkillReminder, dismissSkillPopup, checkAndTriggerSkillReminders } from '../services/skillReminderService.js';
+import { tierForRole } from '../utils/roleTier.js';
 
 const router = Router();
 
@@ -105,10 +106,20 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
   try {
     const isCallerAdmin = req.user!.user_role === 'admin' || req.user!.user_role === 'super_admin';
     const isOwner = req.user!.id === req.params.id;
+    // Holders of manage_users (e.g. a custom "Coordinator" role) may edit other users' profiles,
+    // but only administrators may change roles or touch administrator accounts.
+    const canManageUsers = isCallerAdmin || req.user!.permissions.has('manage_users');
 
-    // Users can update their own profile; admins can update anyone
-    if (!isOwner && !isCallerAdmin) {
+    // Users can update their own profile; admins / user managers can update others
+    if (!isOwner && !canManageUsers) {
       return res.status(403).json({ error: 'Forbidden' });
+    }
+    if (!isOwner && !isCallerAdmin) {
+      const target = await query('SELECT user_role FROM user_profiles WHERE id = $1', [req.params.id]);
+      if (target.rows.length === 0) return res.status(404).json({ error: 'User not found' });
+      if (['admin', 'super_admin'].includes(target.rows[0].user_role)) {
+        return res.status(403).json({ error: 'Only administrators can modify administrator accounts' });
+      }
     }
 
     const fields = req.body;
@@ -151,7 +162,7 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
     }
 
     // Security & RBAC: Strip all privileged / system-controlled fields for non-admin callers
-    if (!isCallerAdmin) {
+    if (!isCallerAdmin && !(canManageUsers && !isOwner)) {
       delete fields.role_id;
       delete fields.user_role;
       delete fields.is_active;
@@ -159,6 +170,10 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
       delete fields.is_profile_completed;
       delete fields.temp_password_expires_at;
       delete fields.last_password_changed_at;
+    } else if (!isCallerAdmin) {
+      // User managers (non-admin) may activate/deactivate and fix profile flags, never change roles
+      delete fields.role_id;
+      delete fields.user_role;
     } else {
       // Admin role modification: validate role_id against database and synchronize user_role
       if (fields.role_id) {
@@ -166,12 +181,12 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
         if (roleCheck.rows.length === 0) {
           return res.status(400).json({ error: 'Invalid role_id: role does not exist in system' });
         }
-        fields.user_role = roleCheck.rows[0].name.toLowerCase();
+        fields.user_role = tierForRole(roleCheck.rows[0].name);
       } else if (fields.user_role) {
         const roleCheck = await query('SELECT id, name FROM roles WHERE LOWER(name) = LOWER($1)', [fields.user_role]);
         if (roleCheck.rows.length > 0) {
           fields.role_id = roleCheck.rows[0].id;
-          fields.user_role = roleCheck.rows[0].name.toLowerCase();
+          fields.user_role = tierForRole(roleCheck.rows[0].name);
         }
       }
       // Non-super_admin cannot grant super_admin role
@@ -182,6 +197,35 @@ router.put('/:id', authenticate, validateBody(updateUserProfileSchema), async (r
 
     delete fields.id;
     delete fields.created_at;
+
+    if (fields.full_name !== undefined && (!fields.full_name || !String(fields.full_name).trim())) {
+      return res.status(400).json({ error: 'Full name cannot be empty' });
+    }
+    if (fields.email) {
+      const emailTaken = await query('SELECT 1 FROM users WHERE LOWER(email) = LOWER($1) AND id <> $2', [fields.email, req.params.id]);
+      if (emailTaken.rows.length > 0) {
+        return res.status(409).json({ error: 'Another account already uses this email address' });
+      }
+    }
+    // Date ranges must be in order (compare with stored values when only one side changes)
+    const datePairs: [string, string, string][] = [
+      ['project_start_date', 'project_end_date', 'Project end date'],
+      ['staff_contract_start_date', 'staff_contract_end_date', 'Contract end date'],
+    ];
+    const needsCurrent = datePairs.some(([a, b]) => fields[a] !== undefined || fields[b] !== undefined);
+    if (needsCurrent) {
+      const cur = await query(
+        `SELECT project_start_date::text, project_end_date::text, staff_contract_start_date::text, staff_contract_end_date::text
+         FROM user_profiles WHERE id = $1`, [req.params.id]);
+      const row = cur.rows[0] || {};
+      for (const [a, b, label] of datePairs) {
+        const start = fields[a] !== undefined ? fields[a] : row[a];
+        const end = fields[b] !== undefined ? fields[b] : row[b];
+        if (start && end && String(end).slice(0, 10) < String(start).slice(0, 10)) {
+          return res.status(400).json({ error: `${label} cannot be earlier than the start date` });
+        }
+      }
+    }
 
     // Convert empty strings to null for nullable db columns
     for (const key of Object.keys(fields)) {

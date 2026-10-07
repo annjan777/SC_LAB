@@ -18,3 +18,4 @@ npm-debug.log*
 
 # Backups
 server/backups/*.zip
+server/backups/*.sql

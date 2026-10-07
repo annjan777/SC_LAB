@@ -51,7 +51,7 @@ router.post('/login', validateBody(loginSchema), async (req: Request, res: Respo
   try {
     const { email, password } = req.body;
 
-    const userResult = await query('SELECT id, email, password_hash FROM users WHERE email = $1', [email]);
+    const userResult = await query('SELECT id, email, password_hash FROM users WHERE LOWER(email) = LOWER($1)', [email]);
     if (userResult.rows.length === 0) {
       recordFailedLogin(req.ip || req.socket.remoteAddress || 'unknown');
       return res.status(401).json({ error: 'Invalid credentials' });
@@ -69,6 +69,10 @@ router.post('/login', validateBody(loginSchema), async (req: Request, res: Respo
 
     const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [user.id]);
     const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
+
+    if (profile && profile.is_active === false) {
+      return res.status(403).json({ error: 'Account has been deactivated. Contact an administrator.' });
+    }
 
     if (profile?.require_password_change) {
       if (profile.temp_password_expires_at && new Date(profile.temp_password_expires_at) < new Date()) {
@@ -125,6 +129,11 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
       if (!valid) {
         return res.status(401).json({ error: 'Incorrect current password' });
       }
+    }
+
+    const currentHashRes = await query('SELECT password_hash FROM users WHERE id = $1', [req.user!.id]);
+    if (currentHashRes.rows[0]?.password_hash && await bcrypt.compare(password, currentHashRes.rows[0].password_hash)) {
+      return res.status(400).json({ error: 'New password must be different from your current or temporary password' });
     }
 
     const hash = await bcrypt.hash(password, 10);
@@ -189,7 +198,7 @@ router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req: 
     const { email } = req.body;
 
     const userResult = await query(
-      'SELECT u.id, u.email, up.full_name FROM users u LEFT JOIN user_profiles up ON up.id = u.id WHERE u.email = $1',
+      'SELECT u.id, u.email, up.full_name FROM users u LEFT JOIN user_profiles up ON up.id = u.id WHERE LOWER(u.email) = LOWER($1)',
       [email]
     );
 

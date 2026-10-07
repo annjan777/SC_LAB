@@ -13,6 +13,48 @@ function canManage(req: Request, perm: string): boolean {
   return isSuper || isAdmin || (req.user?.permissions.has(perm) ?? false);
 }
 
+
+const WORK_PRIORITIES = ['low', 'medium', 'high', 'code_red'];
+const DEPENDENCY_TYPES = ['blocks', 'is_blocked_by', 'relates_to', 'delayed_by_code_red'];
+
+function isValidIsoDate(v: any): boolean {
+  if (v === undefined || v === null || v === '') return true;
+  const s = String(v);
+  return /^\d{4}-\d{2}-\d{2}/.test(s) && !isNaN(new Date(s.slice(0, 10)).getTime());
+}
+
+// Shared validation for work items (create + edit). Returns an error message or null.
+function validateWorkInput(body: any, opts: { requireTitle: boolean }): string | null {
+  const { work_title, start_date, end_date, priority, milestones, initial_percentage } = body;
+  if (opts.requireTitle || work_title !== undefined) {
+    if (!work_title || !String(work_title).trim()) return 'Work title is required';
+    if (String(work_title).length > 300) return 'Work title must be 300 characters or fewer';
+  }
+  if (!isValidIsoDate(start_date)) return 'Start date is not a valid date (use YYYY-MM-DD)';
+  if (!isValidIsoDate(end_date)) return 'End date is not a valid date (use YYYY-MM-DD)';
+  if (start_date && end_date && String(end_date).slice(0, 10) < String(start_date).slice(0, 10)) {
+    return 'End date cannot be earlier than start date';
+  }
+  if (priority !== undefined && priority !== null && priority !== '' && !WORK_PRIORITIES.includes(priority)) {
+    return `Priority must be one of: ${WORK_PRIORITIES.join(', ')}`;
+  }
+  if (initial_percentage !== undefined && initial_percentage !== null && initial_percentage !== '') {
+    const pct = Number(initial_percentage);
+    if (isNaN(pct) || pct < 0 || pct > 100) return 'Initial completion percentage must be between 0 and 100';
+  }
+  if (Array.isArray(milestones)) {
+    for (const m of milestones) {
+      const title = m?.milestone_description ?? m?.title;
+      if (!title || !String(title).trim()) return 'Every milestone needs a title';
+      if (!isValidIsoDate(m.target_date)) return `Milestone "${title}" has an invalid target date`;
+      if (m.target_date && start_date && String(m.target_date).slice(0, 10) < String(start_date).slice(0, 10)) {
+        return `Milestone "${title}" target date cannot be before the work start date (${String(start_date).slice(0, 10)})`;
+      }
+    }
+  }
+  return null;
+}
+
 async function loadWorkOwner(workId: string, reqUser?: any): Promise<string | null> {
   const r = await query('SELECT user_id, assigned_by_user_id, assigned_by FROM assigned_works WHERE id = $1', [workId]);
   if (!r.rows[0]) return null;
@@ -416,6 +458,9 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       }
     }
 
+    const workInputError = validateWorkInput(req.body, { requireTitle: true });
+    if (workInputError) return res.status(400).json({ error: workInputError });
+
     if (end_date && Array.isArray(milestones)) {
       const pEndDate = String(end_date).slice(0, 10);
       for (const m of milestones) {
@@ -564,6 +609,13 @@ router.put('/:id', authenticate, async (req: Request, res: Response) => {
 
     const prevWorkRes = await query('SELECT * FROM assigned_works WHERE id = $1', [req.params.id]);
     const prevWork = prevWorkRes.rows[0];
+    const asIso = (d: any) => (d instanceof Date ? d.toISOString().slice(0, 10) : d);
+    const editError = validateWorkInput({
+      ...req.body,
+      start_date: req.body.start_date !== undefined ? req.body.start_date : asIso(prevWork?.start_date),
+      end_date: req.body.end_date !== undefined ? req.body.end_date : asIso(prevWork?.end_date),
+    }, { requireTitle: false });
+    if (editError) return res.status(400).json({ error: editError });
 
     const fields = { ...req.body };
     const milestones = Array.isArray(fields.milestones) ? fields.milestones : [];
@@ -777,7 +829,7 @@ router.get('/:id/milestones', authenticate, async (req: Request, res: Response) 
     await syncOverdueMilestones();
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const result = await query(
@@ -895,6 +947,13 @@ router.put('/:id/milestones/:milestoneId', authenticate, async (req: Request, re
           error: 'Modifying milestone details (title, dates, or expected outcome) requires submitting a Milestone Change Request for Admin approval.'
         });
       }
+    }
+
+    // Completing an already-completed milestone again is a no-op: never overwrite the recorded justification.
+    const wantsComplete = status === 'completed' || (status === undefined && is_completed === true);
+    if (prevMilestone.status === 'completed' && wantsComplete &&
+        milestone_description === undefined && title === undefined && expected_outcome === undefined && target_date === undefined) {
+      return res.json(prevMilestone);
     }
 
     const fields: Record<string, any> = {};
@@ -1140,6 +1199,9 @@ router.put('/:id/milestones/:milestoneId/review-justification', authenticate, as
     if (!isAdmin && !isManager && !isSupervisor) {
       return res.status(403).json({ error: 'Only the assigned supervisor or an administrator can review milestone justifications' });
     }
+    if (work?.user_id === req.user!.id && !isAdmin) {
+      return res.status(403).json({ error: 'You cannot review the justification on your own work item' });
+    }
 
     const { status, review_notes } = req.body;
     if (!['approved', 'rejected'].includes(status)) {
@@ -1213,7 +1275,7 @@ router.get('/:id/progress', authenticate, async (req: Request, res: Response) =>
   try {
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const result = await query(
@@ -1262,6 +1324,17 @@ router.post('/:id/progress', authenticate, async (req: Request, res: Response) =
     if (status && !validStatuses.includes(finalStatus)) {
       return res.status(400).json({ error: `Invalid status. Must be one of: ${validStatuses.join(', ')}` });
     }
+    if (finalStatus === 'completed' || finalPercentage === 100) {
+      const openMs = await query(
+        "SELECT COUNT(*)::int AS n FROM work_milestones WHERE work_id = $1 AND status <> 'completed'",
+        [req.params.id]
+      );
+      if (openMs.rows[0].n > 0) {
+        return res.status(400).json({
+          error: `Cannot mark this work completed while ${openMs.rows[0].n} milestone(s) are still open. Complete the milestones first.`,
+        });
+      }
+    }
 
     // Validate update_date if provided
     let finalDate = new Date().toISOString().slice(0, 10);
@@ -1304,7 +1377,7 @@ router.get('/:id/problems', authenticate, async (req: Request, res: Response) =>
   try {
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const result = await query(
@@ -1416,7 +1489,7 @@ router.get('/:id/comments', authenticate, async (req: Request, res: Response) =>
   try {
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
     const result = await query(`
@@ -1466,7 +1539,7 @@ router.get('/:id/dependencies', authenticate, async (req: Request, res: Response
   try {
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -1520,6 +1593,29 @@ router.post('/:id/dependencies', authenticate, async (req: Request, res: Respons
     }
     if (depends_on_work_id === req.params.id) {
       return res.status(400).json({ error: 'A work item cannot depend on itself' });
+    }
+    if (!DEPENDENCY_TYPES.includes(dependency_type)) {
+      return res.status(400).json({ error: `Dependency type must be one of: ${DEPENDENCY_TYPES.join(', ')}` });
+    }
+    const dupDep = await query(
+      'SELECT 1 FROM work_dependencies WHERE work_id = $1 AND depends_on_work_id = $2',
+      [req.params.id, depends_on_work_id]
+    );
+    if (dupDep.rows.length > 0) {
+      return res.status(409).json({ error: 'These work items are already linked' });
+    }
+    // Reject links that would create a cycle (A depends on B while B already depends, directly or indirectly, on A)
+    const cycle = await query(
+      `WITH RECURSIVE chain(id) AS (
+         SELECT depends_on_work_id FROM work_dependencies WHERE work_id = $1
+         UNION
+         SELECT wd.depends_on_work_id FROM work_dependencies wd JOIN chain c ON wd.work_id = c.id
+       )
+       SELECT 1 FROM chain WHERE id = $2 LIMIT 1`,
+      [depends_on_work_id, req.params.id]
+    );
+    if (cycle.rows.length > 0) {
+      return res.status(400).json({ error: 'This link would create a circular dependency' });
     }
 
     const targetWorkRes = await query('SELECT id, issue_key, work_title, priority FROM assigned_works WHERE id = $1', [depends_on_work_id]);
@@ -1595,7 +1691,7 @@ router.get('/:id/milestone-change-requests', authenticate, async (req: Request, 
   try {
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 
@@ -1737,25 +1833,35 @@ router.put('/:id/milestone-change-requests/:requestId/review', authenticate, asy
       if (status === 'approved') {
         const proposedMilestones = changeRequest.proposed_milestones || [];
         
-        // Remove existing milestones and replace with approved proposed milestones
-        await client.query('DELETE FROM work_milestones WHERE work_id = $1', [req.params.id]);
-        
+        // Apply the approved proposal IN PLACE: existing milestones keep their id, status, justification
+        // and review history (only title / date / outcome change); new entries are inserted; milestones
+        // left out of the proposal are removed.
+        const existingRes = await client.query('SELECT id FROM work_milestones WHERE work_id = $1', [req.params.id]);
+        const existingIds = new Set<string>(existingRes.rows.map((r: any) => r.id));
+        const keptIds = new Set<string>();
+
         for (const m of proposedMilestones) {
           const title = m.milestone_description || m.title;
           if (!title || !m.target_date) continue;
-          await client.query(
-            `INSERT INTO work_milestones (work_id, title, target_date, expected_outcome, status, justification, justification_linked_work_id)
-             VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-            [
-              req.params.id,
-              title,
-              m.target_date,
-              m.expected_outcome || null,
-              m.is_completed ? 'completed' : (m.status || 'pending'),
-              m.justification || null,
-              m.justification_linked_work_id || null
-            ]
-          );
+          if (m.id && existingIds.has(m.id)) {
+            keptIds.add(m.id);
+            await client.query(
+              `UPDATE work_milestones SET title = $1, target_date = $2, expected_outcome = $3, updated_at = now()
+               WHERE id = $4 AND work_id = $5`,
+              [title, m.target_date, m.expected_outcome || null, m.id, req.params.id]
+            );
+          } else {
+            await client.query(
+              `INSERT INTO work_milestones (work_id, title, target_date, expected_outcome, status)
+               VALUES ($1, $2, $3, $4, 'pending')`,
+              [req.params.id, title, m.target_date, m.expected_outcome || null]
+            );
+          }
+        }
+        for (const id of existingIds) {
+          if (!keptIds.has(id)) {
+            await client.query('DELETE FROM work_milestones WHERE id = $1 AND work_id = $2', [id, req.params.id]);
+          }
         }
 
         await recalculateProgressFromMilestones(client, req.params.id);
@@ -1806,7 +1912,7 @@ router.get('/:id/activity', authenticate, async (req: Request, res: Response) =>
   try {
     const ownerId = await loadWorkOwner(req.params.id, req.user);
     if (ownerId === null) return res.status(404).json({ error: 'Not found' });
-    if (ownerId !== req.user!.id && !canManage(req, 'view_work')) {
+    if (ownerId !== req.user!.id && !canManage(req, 'manage_work_cycles') && !canManage(req, 'manage_users')) {
       return res.status(403).json({ error: 'Insufficient permissions' });
     }
 

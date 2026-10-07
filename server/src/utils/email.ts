@@ -78,8 +78,9 @@ export async function sendTempPasswordEmail(
   const portalUrl = loginUrl || config.appUrl;
 
   if (!config.user || !config.pass) {
-    console.warn(`\n[DEV MODE TEMP PASSWORD FOR ${to}]: ${tempPassword}\n`);
-    return { success: true };
+    // Never write credentials to logs in production; report the failure so the admin shares the password manually.
+    if (process.env.NODE_ENV !== 'production') console.warn(`\n[DEV MODE TEMP PASSWORD FOR ${to}]: ${tempPassword}\n`);
+    return { success: false, error: 'Email is not configured on the server (SMTP_USER/SMTP_PASS missing)' };
   }
 
   const subject = `Your ${config.appName} account — temporary password`;
@@ -133,8 +134,8 @@ export async function sendPasswordResetLinkEmail(
   const config = getEmailConfig();
 
   if (!config.user || !config.pass) {
-    console.warn(`\n[DEV MODE RESET LINK FOR ${to}]: ${resetUrl}\n`);
-    return { success: true };
+    if (process.env.NODE_ENV !== 'production') console.warn(`\n[DEV MODE RESET LINK FOR ${to}]: ${resetUrl}\n`);
+    return { success: false, error: 'Email is not configured on the server (SMTP_USER/SMTP_PASS missing)' };
   }
 
   const subject = `${config.appName} — Reset Your Password`;

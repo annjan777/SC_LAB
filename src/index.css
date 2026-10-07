@@ -477,3 +477,6 @@ html.dark .text-amber-700,
 html.dark .text-teal-700 {
   color: #93c5fd !important;
 }
+
+/* Modals rendered inside a space-y-* container must not inherit its top margin (it leaves a strip above the overlay). */
+[class*="space-y-"] > .fixed.inset-0 { margin-top: 0 !important; }

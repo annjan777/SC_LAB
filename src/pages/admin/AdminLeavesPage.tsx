@@ -391,10 +391,10 @@ export default function AdminLeavesPage() {
                   </div>
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">
-                      {request.user_profiles.full_name}
+                      {request.user_profiles?.full_name}
                     </h3>
                     <p className="text-sm text-gray-500">
-                      {request.user_profiles.department || 'No department'} •{' '}
+                      {request.user_profiles?.department || 'No department'} •{' '}
                       {calculateDays(request.from_date, request.to_date)} day(s)
                     </p>
                   </div>

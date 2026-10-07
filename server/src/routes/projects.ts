@@ -84,6 +84,38 @@ router.use(authenticate);
  * List all projects with computed fields (days_to_close, days_since_update, achievement counts).
  * Supports search and filters by status, rag_status, and category.
  */
+
+const RAG_VALUES = ['Green', 'Amber', 'Red', 'Grey'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const isIsoDate = (v: any) => v === undefined || v === null || v === '' ||
+  (/^\d{4}-\d{2}-\d{2}/.test(String(v)) && !isNaN(new Date(String(v).slice(0, 10)).getTime()));
+
+// Validation shared by create and update. `current` = stored row when updating.
+async function validateProject(body: any, current: any | null): Promise<string | null> {
+  const title = body.project_title;
+  if (title !== undefined && typeof title === 'string' && title.length > 300) return 'Project title must be 300 characters or fewer';
+  for (const k of ['start_date', 'closing_date', 'last_funder_review', 'last_weekly_update']) {
+    if (!isIsoDate(body[k])) return `${k.replace(/_/g, ' ')} is not a valid date (use YYYY-MM-DD)`;
+  }
+  const start = body.start_date !== undefined ? body.start_date : current?.start_date;
+  const close = body.closing_date !== undefined ? body.closing_date : current?.closing_date;
+  if (start && close && String(close).slice(0, 10) < String(start).slice(0, 10)) return 'Closing date cannot be earlier than the start date';
+  if (body.rag_status !== undefined && body.rag_status !== null && body.rag_status !== '' && !RAG_VALUES.includes(body.rag_status)) {
+    return `RAG status must be one of: ${RAG_VALUES.join(', ')}`;
+  }
+  const code = typeof body.project_code === 'string' ? body.project_code.trim() : '';
+  if (code) {
+    const dup = await query('SELECT id FROM projects WHERE LOWER(project_code) = LOWER($1) AND ($2::uuid IS NULL OR id <> $2::uuid) LIMIT 1', [code, current?.id || null]);
+    if (dup.rows.length > 0) return `Project code "${code}" is already used by another project`;
+  }
+  return null;
+}
+
+router.param('id', (req: Request, res: Response, next, id) => {
+  if (!UUID_RE.test(String(id))) return res.status(400).json({ error: 'Invalid project id' });
+  next();
+});
+
 router.get('/', requirePermission('view_projects'), async (req: Request, res: Response) => {
   try {
     const { search, status, rag_status, category } = req.query;
@@ -250,6 +282,8 @@ router.post('/', requirePermission('create_projects'), async (req: Request, res:
     if (!project_title || typeof project_title !== 'string' || project_title.trim() === '') {
       return res.status(400).json({ error: 'Project title is required' });
     }
+    const createError = await validateProject(req.body, null);
+    if (createError) return res.status(400).json({ error: createError });
 
     // Generate unique Tracker ID from sequence: TRK-001, TRK-002, ...
     const seqRes = await query("SELECT nextval('project_tracker_seq') AS seq");
@@ -324,10 +358,12 @@ router.post('/', requirePermission('create_projects'), async (req: Request, res:
 router.put('/:id', requirePermission('edit_projects'), async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const existing = await query('SELECT id, tracker_id FROM projects WHERE id = $1', [id]);
+    const existing = await query('SELECT id, tracker_id, start_date::text AS start_date, closing_date::text AS closing_date FROM projects WHERE id = $1', [id]);
     if (existing.rows.length === 0) {
       return res.status(404).json({ error: 'Project not found' });
     }
+    const updateError = await validateProject(req.body, existing.rows[0]);
+    if (updateError) return res.status(400).json({ error: updateError });
 
     const {
       project_code,
@@ -670,13 +706,28 @@ router.post('/:id/achievements', requirePermission('add_project_achievement'), a
 
   try {
     // Verify project exists
-    const projCheck = await query('SELECT id FROM projects WHERE id = $1', [id]);
+    const projCheck = await query('SELECT id, team, faculty_lead_pi, accountable_owner_poc FROM projects WHERE id = $1', [id]);
     if (projCheck.rows.length === 0) {
       return res.status(404).json({ error: 'Project not found' });
     }
 
     // Determine author name
     const userProfile = await query('SELECT full_name, email FROM user_profiles WHERE id = $1', [req.user!.id]);
+
+    // Members may only post to projects they belong to (team list, PI or accountable owner, matched by name).
+    if (!req.user!.permissions.has('edit_projects') && !['admin', 'super_admin'].includes(req.user!.user_role)) {
+      const me = String(userProfile.rows[0]?.full_name || '').trim().toLowerCase();
+      const proj = projCheck.rows[0];
+      const team = Array.isArray(proj.team) ? proj.team : [];
+      const names = [
+        ...team.map((m: any) => String(m?.name || '').trim().toLowerCase()),
+        String(proj.faculty_lead_pi || '').trim().toLowerCase(),
+        String(proj.accountable_owner_poc || '').trim().toLowerCase(),
+      ];
+      if (!me || !names.includes(me)) {
+        return res.status(403).json({ error: 'Only members of this project team can post achievements to it' });
+      }
+    }
     const authorName = userProfile.rows[0]?.full_name || req.user!.email || 'Lab Member';
 
     // Insert new achievement record

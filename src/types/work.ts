@@ -12,6 +12,7 @@ export type DependencyType = 'blocks' | 'is_blocked_by' | 'relates_to' | 'delaye
 
 export interface AssignedWork {
   id: string;
+  unapproved_delayed_milestones_count?: number;
   issue_key?: string;
   issue_type?: IssueType;
   project_name: string;

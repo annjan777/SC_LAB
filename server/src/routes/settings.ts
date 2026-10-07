@@ -4,6 +4,16 @@ import { authenticate, requirePermission } from '../middleware/auth.js';
 
 const router = Router();
 
+const SYSTEM_ROLE_NAMES = ['admin', 'user'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const fail = (res: Response, err: any) => {
+  if (err?.code === '23505') return res.status(409).json({ error: 'A role with this name already exists' });
+  if (err?.code === '22P02') return res.status(400).json({ error: 'Invalid id' });
+  if (err?.code === '23503') return res.status(400).json({ error: 'Referenced record does not exist' });
+  console.error(err);
+  return res.status(500).json({ error: 'Internal Server Error' });
+};
+
 // --- ROLES ---
 router.get('/roles', authenticate, requirePermission('manage_roles', 'manage_settings'), async (_req: Request, res: Response) => {
   try {
@@ -14,22 +24,34 @@ router.get('/roles', authenticate, requirePermission('manage_roles', 'manage_set
 
 router.post('/roles', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req: Request, res: Response) => {
   try {
-    const { name, description } = req.body;
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    if (!name) return res.status(400).json({ error: 'Role name is required' });
+    if (name.length > 60) return res.status(400).json({ error: 'Role name must be at most 60 characters' });
+    const dup = await query('SELECT 1 FROM roles WHERE LOWER(name) = LOWER($1)', [name]);
+    if (dup.rows.length) return res.status(409).json({ error: 'A role with this name already exists' });
     const result = await query(
       'INSERT INTO roles (name, description) VALUES ($1, $2) RETURNING *',
-      [name, description]
+      [name, req.body.description ?? null]
     );
     res.status(201).json(result.rows[0]);
-  } catch (err: any) { console.error(err); res.status(500).json({ error: 'Internal Server Error' }); }
+  } catch (err: any) { fail(res, err); }
 });
 
 router.delete('/roles/:id', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req: Request, res: Response) => {
   try {
-    const check = await query('SELECT is_system_role FROM roles WHERE id = $1', [req.params.id]);
-    if (check.rows[0]?.is_system_role) return res.status(400).json({ error: 'Cannot delete system role' });
+    if (!UUID_RE.test(req.params.id)) return res.status(400).json({ error: 'Invalid role id' });
+    const check = await query('SELECT name, is_system_role FROM roles WHERE id = $1', [req.params.id]);
+    if (!check.rows.length) return res.status(404).json({ error: 'Role not found' });
+    if (check.rows[0].is_system_role || SYSTEM_ROLE_NAMES.includes(String(check.rows[0].name).toLowerCase())) {
+      return res.status(400).json({ error: 'Cannot delete system role' });
+    }
+    const inUse = await query('SELECT count(*)::int AS n FROM user_profiles WHERE role_id = $1', [req.params.id]);
+    if (inUse.rows[0].n > 0) {
+      return res.status(409).json({ error: `This role is still assigned to ${inUse.rows[0].n} user(s). Move them to another role first.` });
+    }
     await query('DELETE FROM roles WHERE id = $1', [req.params.id]);
     res.json({ message: 'Deleted' });
-  } catch (err: any) { console.error(err); res.status(500).json({ error: 'Internal Server Error' }); }
+  } catch (err: any) { fail(res, err); }
 });
 
 // --- PERMISSIONS ---
@@ -56,6 +78,18 @@ router.get('/role-permissions/:roleId', authenticate, requirePermission('manage_
 router.put('/role-permissions/:roleId', authenticate, requirePermission('manage_roles', 'manage_settings'), async (req: Request, res: Response) => {
   try {
     const { permission_ids } = req.body; // array of permission UUIDs
+    if (!UUID_RE.test(req.params.roleId)) return res.status(400).json({ error: 'Invalid role id' });
+    if (!Array.isArray(permission_ids) || permission_ids.some((p: any) => typeof p !== 'string' || !UUID_RE.test(p))) {
+      return res.status(400).json({ error: 'permission_ids must be an array of permission ids' });
+    }
+    const role = await query('SELECT name FROM roles WHERE id = $1', [req.params.roleId]);
+    if (!role.rows.length) return res.status(404).json({ error: 'Role not found' });
+    if (String(role.rows[0].name).toLowerCase() === 'admin') {
+      const required = await query("SELECT id FROM permissions WHERE name IN ('manage_roles','manage_users','manage_settings')");
+      if (required.rows.some((r: any) => !permission_ids.includes(r.id))) {
+        return res.status(400).json({ error: 'The admin role must keep manage_roles, manage_users and manage_settings (otherwise administrators lock themselves out)' });
+      }
+    }
     await query('DELETE FROM role_permissions WHERE role_id = $1', [req.params.roleId]);
     for (const pid of permission_ids) {
       await query(
@@ -64,7 +98,7 @@ router.put('/role-permissions/:roleId', authenticate, requirePermission('manage_
       );
     }
     res.json({ message: 'Updated' });
-  } catch (err: any) { console.error(err); res.status(500).json({ error: 'Internal Server Error' }); }
+  } catch (err: any) { fail(res, err); }
 });
 
 // --- USER PERMISSIONS (direct grants) ---
@@ -86,7 +120,7 @@ router.put('/user-permissions/:userId', authenticate, requirePermission('manage_
 
     // Update role
     if (role_id !== undefined) {
-      await query('UPDATE user_profiles SET role_id = $1 WHERE id = $2', [role_id, req.params.userId]);
+      await query("UPDATE user_profiles up SET role_id = r.id, user_role = CASE WHEN LOWER(r.name) IN ('super_admin','admin','lab_manager','researcher','student','guest','user') THEN LOWER(r.name) ELSE 'user' END FROM roles r WHERE r.id = $1 AND up.id = $2", [role_id, req.params.userId]);
     }
 
     // Update direct permissions

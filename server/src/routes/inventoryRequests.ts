@@ -155,6 +155,9 @@ router.post('/assign', authenticate, async (req: Request, res: Response) => {
     if (returnableBool && !expected_return_date) {
       return res.status(400).json({ error: 'Expected return date is required for returnable items' });
     }
+    if (returnableBool && String(expected_return_date).slice(0, 10) < new Date().toISOString().slice(0, 10)) {
+      return res.status(400).json({ error: 'Expected return date cannot be in the past' });
+    }
 
     const itemRes = await query('SELECT * FROM inventory_items WHERE id = $1', [inventory_item_id]);
     if (itemRes.rows.length === 0) {
@@ -489,6 +492,9 @@ router.put('/:id/issue', authenticate, async (req: Request, res: Response) => {
     if (returnableBool && !expected_return_date) {
       return res.status(400).json({ error: 'Expected return date is required for returnable equipment' });
     }
+    if (returnableBool && String(expected_return_date).slice(0, 10) < new Date().toISOString().slice(0, 10)) {
+      return res.status(400).json({ error: 'Expected return date cannot be in the past' });
+    }
 
     // Begin lock & transaction
     const reqRes = await query(
@@ -507,6 +513,9 @@ router.put('/:id/issue', authenticate, async (req: Request, res: Response) => {
 
     if (['issued', 'returned'].includes(itemReq.status)) {
       return res.status(400).json({ error: `Request has already been processed (status: ${itemReq.status})` });
+    }
+    if (itemReq.status !== 'approved') {
+      return res.status(400).json({ error: `Only approved requests can be issued (current status: ${itemReq.status}). Approve the request first.` });
     }
 
     // 1. Non-returnable stock deduction logic
@@ -651,6 +660,9 @@ router.put('/:id/return', authenticate, async (req: Request, res: Response) => {
 
     if (!['issued', 'overdue'].includes(itemReq.status)) {
       return res.status(400).json({ error: `Cannot return request with status '${itemReq.status}'` });
+    }
+    if (itemReq.is_returnable === false) {
+      return res.status(400).json({ error: 'This item was issued as non-returnable (consumed) and cannot be returned' });
     }
 
     // Update request

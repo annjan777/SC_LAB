@@ -942,7 +942,7 @@ export default function WorkEntryDetailModal({
                                               </span>
                                             </div>
                                             <p className="text-xs text-gray-600 dark:text-slate-300 mt-1 leading-relaxed">
-                                              {m.justification_status === 'rejected'
+                                              {(m.justification_status as string | null | undefined) === 'rejected'
                                                 ? `You have rejected this milestone delay. It remains marked as Delayed until assignee resolves or completes this milestone.`
                                                 : `Assignee has not submitted delay justification. As Supervisor, you can approve the delay, reject it as unjustified, or reschedule.`}
                                             </p>
@@ -964,7 +964,7 @@ export default function WorkEntryDetailModal({
                                               <CheckCircle2 className="w-3.5 h-3.5" />
                                               <span>Approve Delay</span>
                                             </button>
-                                            {m.justification_status !== 'rejected' && (
+                                            {(m.justification_status as string | null | undefined) !== 'rejected' && (
                                               <button
                                                 type="button"
                                                 disabled={reviewingMilestoneId === m.id}

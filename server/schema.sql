@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
   permission_id uuid NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
   granted_by uuid REFERENCES users(id),
   granted_at timestamptz DEFAULT now(),
+  granted boolean NOT NULL DEFAULT true, -- false = revoke a permission the user's role would give
   UNIQUE(user_id, permission_id)
 );
 
@@ -638,14 +639,20 @@ BEGIN
   SELECT p.name
   FROM user_permissions up
   JOIN permissions p ON p.id = up.permission_id
-  WHERE up.user_id = user_uuid
+  WHERE up.user_id = user_uuid AND up.granted = true
   UNION
   -- Role-based permissions
   SELECT p.name
   FROM user_profiles prof
   JOIN role_permissions rp ON rp.role_id = prof.role_id
   JOIN permissions p ON p.id = rp.permission_id
-  WHERE prof.id = user_uuid;
+  WHERE prof.id = user_uuid
+  EXCEPT
+  -- Per-user revocations
+  SELECT p.name
+  FROM user_permissions up
+  JOIN permissions p ON p.id = up.permission_id
+  WHERE up.user_id = user_uuid AND up.granted = false;
 END;
 $$ LANGUAGE plpgsql;
 

@@ -200,10 +200,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Basic Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-1" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Facility Name <span className="text-red-500">*</span>
                   </label>
-                  <input
+                  <input id="fac-field-1"
                     type="text"
                     required
                     value={formData.name}
@@ -213,10 +213,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-2" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Make and Model
                   </label>
-                  <input
+                  <input id="fac-field-2"
                     type="text"
                     value={formData.make_model}
                     onChange={(e) => setFormData({ ...formData, make_model: e.target.value })}
@@ -226,10 +226,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               </div>
 
               <div className="mt-4">
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                <label htmlFor="fac-field-3" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                   Specifications
                 </label>
-                <textarea
+                <textarea id="fac-field-3"
                   value={formData.specifications}
                   onChange={(e) => setFormData({ ...formData, specifications: e.target.value })}
                   rows={3}
@@ -243,10 +243,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Identification</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-4" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Serial Number
                   </label>
-                  <input
+                  <input id="fac-field-4"
                     type="text"
                     value={formData.serial_number}
                     onChange={(e) => setFormData({ ...formData, serial_number: e.target.value })}
@@ -255,10 +255,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-5" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Asset Tag
                   </label>
-                  <input
+                  <input id="fac-field-5"
                     type="text"
                     value={formData.asset_tag}
                     onChange={(e) => setFormData({ ...formData, asset_tag: e.target.value })}
@@ -272,10 +272,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Project & Funding</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-6" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Project Code
                   </label>
-                  <input
+                  <input id="fac-field-6"
                     type="text"
                     value={formData.project_code}
                     onChange={(e) => setFormData({ ...formData, project_code: e.target.value })}
@@ -285,10 +285,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-7" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Funded By
                   </label>
-                  <input
+                  <input id="fac-field-7"
                     type="text"
                     value={formData.funded_by}
                     onChange={(e) => setFormData({ ...formData, funded_by: e.target.value })}
@@ -303,10 +303,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Location and Status</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-8" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Location <span className="text-red-500">*</span>
                   </label>
-                  <input
+                  <input id="fac-field-8"
                     type="text"
                     required
                     value={formData.location}
@@ -317,10 +317,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-9" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Current Status <span className="text-red-500">*</span>
                   </label>
-                  <select
+                  <select id="fac-field-9"
                     required
                     value={formData.status}
                     onChange={(e) => setFormData({ ...formData, status: e.target.value })}
@@ -339,10 +339,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Capacity & Facilities / Features</h3>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-10" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Capacity (Persons / Seats)
                   </label>
-                  <input
+                  <input id="fac-field-10"
                     type="number"
                     min="1"
                     placeholder="e.g. 25"
@@ -353,10 +353,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-11" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Features & Amenities (Comma-separated)
                   </label>
-                  <input
+                  <input id="fac-field-11"
                     type="text"
                     placeholder="e.g. Projector, Video Conferencing, High Voltage Power, Soldering Stations"
                     value={formData.features}
@@ -373,10 +373,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
             <div className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200/60 dark:border-slate-700/60 p-4 rounded-xl">
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Assignment</h3>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                <label htmlFor="fac-field-12" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                   Managed By
                 </label>
-                <select
+                <select id="fac-field-12"
                   value={formData.assigned_to_user_id}
                   onChange={(e) => setFormData({ ...formData, assigned_to_user_id: e.target.value })}
                   className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 rounded-lg text-gray-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
@@ -395,10 +395,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Vendor Information</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-13" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Vendor Name
                   </label>
-                  <input
+                  <input id="fac-field-13"
                     type="text"
                     value={formData.vendor_name}
                     onChange={(e) => setFormData({ ...formData, vendor_name: e.target.value })}
@@ -407,10 +407,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-14" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Vendor Contact Number
                   </label>
-                  <input
+                  <input id="fac-field-14"
                     type="text"
                     value={formData.vendor_contact}
                     onChange={(e) => setFormData({ ...formData, vendor_contact: e.target.value })}
@@ -425,10 +425,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Maintenance</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-15" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Warranty Expiry Date
                   </label>
-                  <input
+                  <input id="fac-field-15"
                     type="date"
                     value={formData.warranty_end_date}
                     onChange={(e) => setFormData({ ...formData, warranty_end_date: e.target.value })}
@@ -437,10 +437,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                  <label htmlFor="fac-field-16" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                     Last Maintenance Date
                   </label>
-                  <input
+                  <input id="fac-field-16"
                     type="date"
                     value={formData.last_maintenance_date}
                     onChange={(e) => setFormData({ ...formData, last_maintenance_date: e.target.value })}
@@ -453,10 +453,10 @@ export default function FacilityFormModal({ facility, onClose, onSuccess }: Faci
             <div className="bg-gray-50 dark:bg-slate-800/50 border border-gray-200/60 dark:border-slate-700/60 p-4 rounded-xl">
               <h3 className="text-base font-semibold text-gray-900 dark:text-slate-100 mb-4">Documentation</h3>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
+                <label htmlFor="fac-field-17" className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                   User Manual URL
                 </label>
-                <input
+                <input id="fac-field-17"
                   type="url"
                   value={formData.user_manual_url}
                   onChange={(e) => setFormData({ ...formData, user_manual_url: e.target.value })}

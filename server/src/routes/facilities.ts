@@ -27,7 +27,34 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + '-' + safeOriginal);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+const ALLOWED_IMAGE_EXT = ['.jpg', '.jpeg', '.png', '.webp', '.gif'];
+const ALLOWED_IMAGE_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname || '').toLowerCase();
+    if (!ALLOWED_IMAGE_EXT.includes(ext) || !ALLOWED_IMAGE_MIME.includes(file.mimetype)) {
+      return cb(Object.assign(new Error('Facility image must be a JPG, PNG, WebP or GIF file'), { statusCode: 400 }));
+    }
+    cb(null, true);
+  },
+});
+
+// Numeric limits and unique names, shared by create and update. Returns an error message or null.
+async function validateFacilityFields(fields: Record<string, any>, currentId: string | null): Promise<string | null> {
+  for (const k of ['max_booking_hours', 'capacity']) {
+    if (fields[k] !== undefined && fields[k] !== null && fields[k] !== '') {
+      const n = Number(fields[k]);
+      if (isNaN(n) || n < 0) return `${k.replace(/_/g, ' ')} cannot be negative`;
+    }
+  }
+  if (fields.name) {
+    const dup = await query('SELECT id FROM facilities WHERE LOWER(TRIM(name)) = LOWER(TRIM($1)) AND ($2::uuid IS NULL OR id <> $2::uuid) LIMIT 1', [String(fields.name), currentId]);
+    if (dup.rows.length > 0) return 'A facility with this name already exists';
+  }
+  return null;
+}
 
 const router = Router();
 
@@ -386,6 +413,9 @@ router.post('/:id/bookings', authenticate, async (req: Request, res: Response) =
     if (endDate <= startDate) {
       return res.status(400).json({ error: 'End time must be after start time' });
     }
+    if (startDate.getTime() < Date.now() - 5 * 60 * 1000) {
+      return res.status(400).json({ error: 'Bookings cannot start in the past' });
+    }
 
     const booking = await transaction(async (client) => {
       // 1. Lock facility row to serialize concurrent booking requests for this facility
@@ -394,7 +424,7 @@ router.post('/:id/bookings', authenticate, async (req: Request, res: Response) =
         throw Object.assign(new Error('Facility not found'), { statusCode: 404 });
       }
       const facility = facilityCheck.rows[0];
-      if (facility.status === 'out_of_order' || facility.status === 'decommissioned') {
+      if (['out_of_order', 'decommissioned', 'under_maintenance'].includes(facility.status)) {
         throw Object.assign(new Error(`Cannot book facility: facility is currently ${facility.status.replace(/_/g, ' ')}`), { statusCode: 400 });
       }
 
@@ -480,6 +510,9 @@ router.put('/bookings/:bookingId/cancel', authenticate, async (req: Request, res
     if (booking.user_id !== userId && !isManager) {
       return res.status(403).json({ error: 'You do not have permission to cancel this booking' });
     }
+    if (booking.status === 'cancelled') {
+      return res.status(400).json({ error: 'This booking is already cancelled' });
+    }
 
     await query(
       `UPDATE facility_bookings SET status = 'cancelled', updated_at = NOW() WHERE id = $1`,
@@ -511,6 +544,8 @@ router.post('/', authenticate, upload.single('image'), async (req: Request, res:
     if (!fields.location || !String(fields.location).trim()) {
       return res.status(400).json({ error: 'Location is required' });
     }
+    const facilityError = await validateFacilityFields(fields, null);
+    if (facilityError) return res.status(400).json({ error: facilityError });
 
     const keys = Object.keys(fields);
     if (keys.length === 0) return res.status(400).json({ error: 'No valid fields to insert' });
@@ -557,6 +592,8 @@ router.put('/:id', authenticate, upload.single('image'), async (req: Request, re
     if ('location' in fields && (!fields.location || !String(fields.location).trim())) {
       return res.status(400).json({ error: 'Location is required' });
     }
+    const facilityUpdateError = await validateFacilityFields(fields, req.params.id);
+    if (facilityUpdateError) return res.status(400).json({ error: facilityUpdateError });
 
     const keys = Object.keys(fields);
     if (keys.length === 0) return res.status(400).json({ error: 'No valid fields to update' });

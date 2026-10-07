@@ -128,56 +128,111 @@ app.use('/api/daily-todos', dailyTodoRoutes);
 app.use('/api/projects', projectRoutes);
 
 // /api/admin/roles → CRUD on roles table
+const SYSTEM_ROLE_NAMES = ['admin', 'user'];
+const roleError = (res: express.Response, err: any) => {
+  if (err?.code === '23505') return res.status(409).json({ error: 'A role with this name already exists' });
+  if (err?.code === '22P02') return res.status(400).json({ error: 'Invalid role or permission id' });
+  if (err?.code === '23503') return res.status(400).json({ error: 'Referenced permission does not exist' });
+  console.error('[roles]', err);
+  return res.status(500).json({ error: 'Internal Server Error' });
+};
+const cleanRoleName = (name: any) => (typeof name === 'string' ? name.trim() : '');
+
 app.get('/api/admin/roles', authenticate, requirePermission('manage_roles'), async (_req, res) => {
-  const roles = await dbQuery('SELECT * FROM roles ORDER BY created_at');
-  const rolesWithPermissions = await Promise.all(
-    roles.rows.map(async (role) => {
-      const perms = await dbQuery(
-        `SELECT p.* FROM permissions p 
-         JOIN role_permissions rp ON rp.permission_id = p.id 
-         WHERE rp.role_id = $1`,
-        [role.id]
-      );
-      return { ...role, permissions: perms.rows };
-    })
-  );
-  res.json(rolesWithPermissions);
+  try {
+    const roles = await dbQuery(
+      `SELECT r.*, (SELECT COUNT(*)::int FROM user_profiles up WHERE up.role_id = r.id) AS user_count
+       FROM roles r ORDER BY r.created_at`
+    );
+    const rolesWithPermissions = await Promise.all(
+      roles.rows.map(async (role) => {
+        const perms = await dbQuery(
+          `SELECT p.* FROM permissions p
+           JOIN role_permissions rp ON rp.permission_id = p.id
+           WHERE rp.role_id = $1`,
+          [role.id]
+        );
+        return { ...role, permissions: perms.rows };
+      })
+    );
+    res.json(rolesWithPermissions);
+  } catch (err) { roleError(res, err); }
 });
 app.post('/api/admin/roles', authenticate, requirePermission('manage_roles'), async (req, res) => {
-  const { name, description, permission_ids, permissions } = req.body;
-  const pids = permission_ids || permissions;
-  const r = await dbQuery('INSERT INTO roles (name, description) VALUES ($1,$2) RETURNING *', [name, description]);
-  if (pids?.length) {
-    for (const pid of pids) {
-      await dbQuery('INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [r.rows[0].id, pid]);
+  try {
+    const { description, permission_ids, permissions } = req.body;
+    const name = cleanRoleName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Role name is required' });
+    if (name.length > 60) return res.status(400).json({ error: 'Role name must be 60 characters or fewer' });
+    const dup = await dbQuery('SELECT 1 FROM roles WHERE LOWER(name) = LOWER($1)', [name]);
+    if (dup.rows.length) return res.status(409).json({ error: 'A role with this name already exists' });
+    const pids = permission_ids || permissions;
+    const r = await dbQuery('INSERT INTO roles (name, description) VALUES ($1,$2) RETURNING *', [name, description]);
+    if (pids?.length) {
+      for (const pid of pids) {
+        await dbQuery('INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [r.rows[0].id, pid]);
+      }
     }
-  }
-  res.status(201).json(r.rows[0]);
+    res.status(201).json(r.rows[0]);
+  } catch (err) { roleError(res, err); }
 });
 app.put('/api/admin/roles/:id', authenticate, requirePermission('manage_roles'), async (req, res) => {
-  const { name, description, permission_ids, permissions } = req.body;
-  const pids = permission_ids || permissions;
-  await dbQuery('UPDATE roles SET name=$1, description=$2 WHERE id=$3', [name, description, req.params.id]);
-  if (pids) {
-    await dbQuery('DELETE FROM role_permissions WHERE role_id = $1', [req.params.id]);
-    for (const pid of pids) {
-      await dbQuery('INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, pid]);
+  try {
+    const { description, permission_ids, permissions } = req.body;
+    const pids = permission_ids || permissions;
+    const current = await dbQuery('SELECT * FROM roles WHERE id = $1', [req.params.id]);
+    if (current.rows.length === 0) return res.status(404).json({ error: 'Role not found' });
+    const role = current.rows[0];
+    const isSystem = role.is_system_role || SYSTEM_ROLE_NAMES.includes(String(role.name).toLowerCase());
+    let name = req.body.name === undefined ? role.name : cleanRoleName(req.body.name);
+    if (!name) return res.status(400).json({ error: 'Role name is required' });
+    if (isSystem && name.toLowerCase() !== String(role.name).toLowerCase()) {
+      return res.status(400).json({ error: 'System roles cannot be renamed' });
     }
-  }
-  const r = await dbQuery('SELECT * FROM roles WHERE id = $1', [req.params.id]);
-  res.json(r.rows[0]);
+    if (name.toLowerCase() !== String(role.name).toLowerCase()) {
+      const dup = await dbQuery('SELECT 1 FROM roles WHERE LOWER(name) = LOWER($1) AND id <> $2', [name, req.params.id]);
+      if (dup.rows.length) return res.status(409).json({ error: 'A role with this name already exists' });
+    }
+    if (String(role.name).toLowerCase() === 'admin' && Array.isArray(pids)) {
+      const required = await dbQuery("SELECT id FROM permissions WHERE name IN ('manage_roles','manage_users','manage_settings')");
+      const missing = required.rows.filter((r: any) => !pids.includes(r.id));
+      if (missing.length) {
+        return res.status(400).json({ error: 'The admin role must keep manage_roles, manage_users and manage_settings (otherwise administrators lock themselves out)' });
+      }
+    }
+    await dbQuery('UPDATE roles SET name=$1, description=$2 WHERE id=$3', [name, description ?? role.description, req.params.id]);
+    if (Array.isArray(pids)) {
+      await dbQuery('DELETE FROM role_permissions WHERE role_id = $1', [req.params.id]);
+      for (const pid of pids) {
+        await dbQuery('INSERT INTO role_permissions (role_id, permission_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [req.params.id, pid]);
+      }
+    }
+    const r = await dbQuery('SELECT * FROM roles WHERE id = $1', [req.params.id]);
+    res.json(r.rows[0]);
+  } catch (err) { roleError(res, err); }
 });
 app.delete('/api/admin/roles/:id', authenticate, requirePermission('manage_roles'), async (req, res) => {
-  const check = await dbQuery('SELECT is_system_role FROM roles WHERE id = $1', [req.params.id]);
-  if (check.rows[0]?.is_system_role) return res.status(400).json({ error: 'Cannot delete system role' });
-  await dbQuery('DELETE FROM roles WHERE id = $1', [req.params.id]);
-  res.json({ message: 'Deleted' });
+  try {
+    const check = await dbQuery('SELECT name, is_system_role FROM roles WHERE id = $1', [req.params.id]);
+    if (check.rows.length === 0) return res.status(404).json({ error: 'Role not found' });
+    if (check.rows[0].is_system_role || SYSTEM_ROLE_NAMES.includes(String(check.rows[0].name).toLowerCase())) {
+      return res.status(400).json({ error: 'Cannot delete system role' });
+    }
+    const inUse = await dbQuery('SELECT count(*)::int AS n FROM user_profiles WHERE role_id = $1', [req.params.id]);
+    if (inUse.rows[0].n > 0) {
+      return res.status(409).json({ error: `This role is still assigned to ${inUse.rows[0].n} user(s). Move them to another role first.` });
+    }
+    await dbQuery('DELETE FROM roles WHERE id = $1', [req.params.id]);
+    res.json({ message: 'Deleted' });
+  } catch (err) { roleError(res, err); }
 });
 
 // /api/admin/permissions
 app.get('/api/admin/permissions', authenticate, requirePermission('manage_roles'), async (_req, res) => {
-  const r = await dbQuery('SELECT * FROM permissions ORDER BY category, display_name');
-  res.json(r.rows);
+  try {
+    const r = await dbQuery('SELECT * FROM permissions ORDER BY category, display_name');
+    res.json(r.rows);
+  } catch (err) { roleError(res, err); }
 });
 
 // CRUD aliases for admin paths - these back the admin approval/overview screens,
@@ -253,65 +308,68 @@ app.use('/api/work-cycles', createCrudRouter({
   deletePermission: 'manage_work_cycles',
 }));
 
+// Generic work CRUD aliases bypass the validation, ownership and change-request rules in routes/work.ts.
+// The UI never calls them, so they are limited to work managers; owners may only read their own rows here.
 app.use('/api/assigned-works', createCrudRouter({
   table: 'assigned_works',
   ownerCol: 'user_id',
   defaultOrder: 'created_at',
-  readPermission: 'view_work',
-  createPermission: 'create_work',
-  updatePermission: 'edit_work',
-  deletePermission: 'delete_work',
+  readPermission: 'manage_work_cycles',
+  createPermission: 'manage_work_cycles',
+  updatePermission: 'manage_work_cycles',
+  deletePermission: 'manage_work_cycles',
+  ownerWrite: false,
 }));
 
 app.use('/api/work-milestones', createCrudRouter({
   table: 'work_milestones',
   defaultOrder: 'created_at',
-  readPermission: 'view_work',
-  createPermission: 'edit_work',
-  updatePermission: 'edit_work',
-  deletePermission: 'edit_work',
+  readPermission: 'manage_work_cycles',
+  createPermission: 'manage_work_cycles',
+  updatePermission: 'manage_work_cycles',
+  deletePermission: 'manage_work_cycles',
 }));
 
 app.use('/api/progress-updates', createCrudRouter({
   table: 'progress_updates',
   defaultOrder: 'update_date',
-  readPermission: 'view_work',
-  createPermission: 'edit_work',
-  updatePermission: 'edit_work',
-  deletePermission: 'edit_work',
+  readPermission: 'manage_work_cycles',
+  createPermission: 'manage_work_cycles',
+  updatePermission: 'manage_work_cycles',
+  deletePermission: 'manage_work_cycles',
 }));
 
 app.use('/api/work-problems', createCrudRouter({
   table: 'work_problems',
   defaultOrder: 'created_at',
-  readPermission: 'view_work',
-  createPermission: 'edit_work',
-  updatePermission: 'edit_work',
-  deletePermission: 'edit_work',
+  readPermission: 'manage_work_cycles',
+  createPermission: 'manage_work_cycles',
+  updatePermission: 'manage_work_cycles',
+  deletePermission: 'manage_work_cycles',
 }));
 
 app.use('/api/mitigation-actions', createCrudRouter({
   table: 'mitigation_actions',
   defaultOrder: 'created_at',
-  readPermission: 'view_work',
-  createPermission: 'edit_work',
-  updatePermission: 'edit_work',
-  deletePermission: 'edit_work',
+  readPermission: 'manage_work_cycles',
+  createPermission: 'manage_work_cycles',
+  updatePermission: 'manage_work_cycles',
+  deletePermission: 'manage_work_cycles',
 }));
 
 app.use('/api/admin-comments', createCrudRouter({
   table: 'admin_comments',
   defaultOrder: 'created_at',
-  readPermission: 'view_work',
-  createPermission: 'edit_work',
-  updatePermission: 'edit_work',
-  deletePermission: 'edit_work',
+  readPermission: 'manage_work_cycles',
+  createPermission: 'manage_work_cycles',
+  updatePermission: 'manage_work_cycles',
+  deletePermission: 'manage_work_cycles',
 }));
 
 app.use('/api/work-dependencies', createCrudRouter({
   table: 'work_dependencies',
   defaultOrder: 'created_at',
-  readPermission: 'view_work',
+  readPermission: 'manage_work_cycles',
   createPermission: 'manage_work_cycles',
   updatePermission: 'manage_work_cycles',
   deletePermission: 'manage_work_cycles',
@@ -371,30 +429,51 @@ import { startSkillReminderCron } from './services/skillReminderService.js';
 import { startEquipmentReturnReminderCron } from './services/equipmentReturnReminderService.js';
 import { syncOverdueMilestones } from './routes/work.js';
 
-app.listen(PORT, '0.0.0.0', async () => {
-  console.log(`SC Lab Server running on port ${PORT}`);
+// A missed async error must never take the whole portal down (Express 4 does not catch rejected promises).
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason);
+});
+
+async function start() {
   await verifyEmailTransport().catch(err => {
     console.error('Email transport verification failed:', err);
   });
-  try {
-    await ensureOperationalSchema();
-    await initializeSuperAdmin();
-  } catch (bootErr) {
-    console.error('CRITICAL: Server boot migration/initialization failed:', bootErr);
-    process.exit(1);
+  // Run migrations and superadmin initialisation BEFORE accepting traffic, so early
+  // logins never hit a half-initialised database. Retry while the database is still starting.
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await ensureOperationalSchema();
+      await initializeSuperAdmin();
+      break;
+    } catch (bootErr: any) {
+      const transient = ['ECONNREFUSED', 'ENOTFOUND', 'ETIMEDOUT', '57P03'].includes(bootErr?.code);
+      if (transient && attempt < 20) {
+        console.warn(`Database not ready (${bootErr.code}); retrying boot in 3s (attempt ${attempt}/20)`);
+        await new Promise(r => setTimeout(r, 3000));
+        continue;
+      }
+      console.error('CRITICAL: Server boot migration/initialization failed:', bootErr);
+      process.exit(1);
+    }
   }
-  startSkillReminderCron();
-  startEquipmentReturnReminderCron();
 
-  // Run initial overdue milestone check to automatically flag milestones past target date as delayed
-  syncOverdueMilestones().catch(err => {
-    console.error('Initial overdue milestones sync failed:', err);
-  });
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`SC Lab Server running on port ${PORT}`);
+    startSkillReminderCron();
+    startEquipmentReturnReminderCron();
 
-  // Check periodically every 60 seconds
-  setInterval(() => {
+    // Run initial overdue milestone check to automatically flag milestones past target date as delayed
     syncOverdueMilestones().catch(err => {
-      console.error('Interval overdue milestones sync failed:', err);
+      console.error('Initial overdue milestones sync failed:', err);
     });
-  }, 60 * 1000);
-});
+
+    // Check periodically every 60 seconds
+    setInterval(() => {
+      syncOverdueMilestones().catch(err => {
+        console.error('Interval overdue milestones sync failed:', err);
+      });
+    }, 60 * 1000);
+  });
+}
+
+start();

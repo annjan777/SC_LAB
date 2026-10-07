@@ -16,6 +16,69 @@ interface CrudOptions {
   updatePermission?: string; // permission required to update rows that aren't the user's own
   deletePermission?: string; // permission required to delete rows that aren't the user's own (falls back to updatePermission)
   defaultOrder?: string;
+  ownerWrite?: boolean;      // when false, owning a row does NOT grant create/update/delete (manager permission required)
+}
+
+// Records an owner may still change/delete only while undecided
+const OWNER_EDITABLE_STATUSES: Record<string, string[]> = {
+  purchase_requests: ['draft', 'submitted'],
+  leave_requests: ['pending'],
+};
+
+// Tables whose list/detail responses carry the requester's profile (the UI renders requester name/department)
+const PROFILE_JOIN: Record<string, string> = {
+  purchase_requests: 'requested_by',
+  leave_requests: 'requested_by',
+};
+
+function isValidDateString(v: any): boolean {
+  if (typeof v !== 'string' || !/^\d{4}-\d{2}-\d{2}/.test(v)) return false;
+  return !isNaN(new Date(v.slice(0, 10)).getTime());
+}
+
+function nonNegativeNumber(v: any): boolean {
+  if (v === undefined || v === null || v === '') return true;
+  const n = Number(v);
+  return !isNaN(n) && n >= 0;
+}
+
+// Field-level validation shared by create and update. Returns an error message or null.
+async function validateEntity(table: string, fields: Record<string, any>, existing: any | null, userId: string): Promise<string | null> {
+  if (table === 'purchase_requests') {
+    if (fields.quantity !== undefined) {
+      const q = Number(fields.quantity);
+      if (!Number.isInteger(q) || q <= 0) return 'Quantity must be a whole number greater than 0';
+    }
+    for (const k of ['estimated_cost', 'unit_price', 'total_cost', 'approved_cost']) {
+      if (!nonNegativeNumber(fields[k])) return `${k.replace(/_/g, ' ')} cannot be negative`;
+    }
+  } else if (table === 'inventory_items') {
+    if (fields.quantity !== undefined && fields.quantity !== null && fields.quantity !== '') {
+      const q = Number(fields.quantity);
+      if (!Number.isInteger(q) || q < 0) return 'Quantity must be a whole number of 0 or more';
+    }
+  } else if (table === 'leave_requests') {
+    const fromD = fields.from_date ?? existing?.from_date;
+    const toD = fields.to_date ?? existing?.to_date;
+    const fromS = fromD instanceof Date ? fromD.toISOString().slice(0, 10) : fromD;
+    const toS = toD instanceof Date ? toD.toISOString().slice(0, 10) : toD;
+    if (fields.from_date !== undefined && !isValidDateString(fromS)) return 'From date is not a valid date (use YYYY-MM-DD)';
+    if (fields.to_date !== undefined && !isValidDateString(toS)) return 'To date is not a valid date (use YYYY-MM-DD)';
+    if (fromS && toS) {
+      if (String(toS).slice(0, 10) < String(fromS).slice(0, 10)) return 'To date cannot be earlier than from date';
+      const owner = existing?.requested_by || userId;
+      const overlap = await query(
+        `SELECT id FROM leave_requests
+         WHERE requested_by = $1 AND status IN ('pending','approved')
+           AND from_date <= $3::date AND to_date >= $2::date
+           AND ($4::uuid IS NULL OR id <> $4::uuid)
+         LIMIT 1`,
+        [owner, String(fromS).slice(0, 10), String(toS).slice(0, 10), existing?.id || null]
+      );
+      if (overlap.rows.length > 0) return 'These dates overlap an existing pending or approved leave request';
+    }
+  }
+  return null;
 }
 
 function handleDbError(err: any, res: Response) {
@@ -48,7 +111,7 @@ export function createCrudRouter(opts: CrudOptions) {
   const {
     table, ownerCol, adminOnly, readOnly,
     readPermission, createPermission, updatePermission, deletePermission,
-    defaultOrder,
+    defaultOrder, ownerWrite = true,
   } = opts;
 
   const safeTable = sanitizeIdentifier(table);
@@ -72,6 +135,9 @@ export function createCrudRouter(opts: CrudOptions) {
       let sql = `SELECT * FROM ${safeTable}`;
       if (table === 'inventory_items') {
         sql = `SELECT "${safeTable}".*, f.name AS facility_name, f.location AS facility_location, u.full_name AS assigned_to_name, u.email AS assigned_to_email FROM "${safeTable}" LEFT JOIN facilities f ON f.id = "${safeTable}".facility_id LEFT JOIN user_profiles u ON u.id = "${safeTable}".assigned_to_user_id`;
+      } else if (PROFILE_JOIN[table]) {
+        const col = sanitizeIdentifier(PROFILE_JOIN[table]);
+        sql = `SELECT "${safeTable}".*, json_build_object('full_name', rp.full_name, 'email', rp.email, 'department', rp.department) AS user_profiles FROM "${safeTable}" LEFT JOIN user_profiles rp ON rp.id = "${safeTable}"."${col}"`;
       }
       const params: any[] = [];
       const conditions: string[] = [];
@@ -136,6 +202,10 @@ export function createCrudRouter(opts: CrudOptions) {
   router.get('/:id', authenticate, async (req: Request, res: Response) => {
     try {
       let singleSql = `SELECT * FROM ${safeTable} WHERE id = $1`;
+      if (PROFILE_JOIN[table]) {
+        const col = sanitizeIdentifier(PROFILE_JOIN[table]);
+        singleSql = `SELECT "${safeTable}".*, json_build_object('full_name', rp.full_name, 'email', rp.email, 'department', rp.department) AS user_profiles FROM "${safeTable}" LEFT JOIN user_profiles rp ON rp.id = "${safeTable}"."${col}" WHERE "${safeTable}".id = $1`;
+      }
       if (table === 'inventory_items') {
         singleSql = `SELECT "${safeTable}".*, f.name AS facility_name, f.location AS facility_location, u.full_name AS assigned_to_name, u.email AS assigned_to_email FROM "${safeTable}" LEFT JOIN facilities f ON f.id = "${safeTable}".facility_id LEFT JOIN user_profiles u ON u.id = "${safeTable}".assigned_to_user_id WHERE "${safeTable}".id = $1`;
       }
@@ -160,9 +230,9 @@ export function createCrudRouter(opts: CrudOptions) {
   // POST - create
   router.post('/', authenticate, async (req: Request, res: Response) => {
     try {
-      // Owner-scoped resources are self-service by default; blanket permissions
-      // widen access beyond the caller's own rows.
-      if (createPermission && !hasPerm(req, createPermission) && !safeOwnerCol) {
+      // Creating always requires the create permission (members get it through their role), so an
+      // administrator can switch it off for one user with a per-user revocation.
+      if (createPermission && !hasPerm(req, createPermission)) {
         return res.status(403).json({ error: 'Insufficient permissions' });
       }
 
@@ -236,10 +306,11 @@ export function createCrudRouter(opts: CrudOptions) {
         if (!fields.to_date || (typeof fields.to_date === 'string' && !fields.to_date.trim())) {
           return res.status(400).json({ error: 'To date is required' });
         }
-        if (String(fields.to_date) < String(fields.from_date)) {
-          return res.status(400).json({ error: 'To date cannot be earlier than from date' });
-        }
+        // date validity, order and overlap are checked in validateEntity below
       }
+
+      const entityError = await validateEntity(table, fields, null, req.user!.id);
+      if (entityError) return res.status(400).json({ error: entityError });
 
       const rawKeys = Object.keys(fields);
       if (rawKeys.length === 0) return res.status(400).json({ error: 'No fields provided' });
@@ -306,8 +377,11 @@ export function createCrudRouter(opts: CrudOptions) {
 
       const isOwner = safeOwnerCol ? existing.rows[0][safeOwnerCol] === req.user!.id : false;
       const hasManagerPerm = hasPerm(req, updatePermission);
-      if (!isOwner && !hasManagerPerm) {
+      if (!hasManagerPerm && (!isOwner || !ownerWrite)) {
         return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      if (!hasManagerPerm && OWNER_EDITABLE_STATUSES[table] && !OWNER_EDITABLE_STATUSES[table].includes(existing.rows[0].status)) {
+        return res.status(403).json({ error: `This request has already been ${existing.rows[0].status} and can no longer be changed` });
       }
 
       const fields = { ...req.body };
@@ -330,13 +404,9 @@ export function createCrudRouter(opts: CrudOptions) {
         if (!fields.location || (typeof fields.location === 'string' && !fields.location.trim())) {
           return res.status(400).json({ error: 'Location is mandatory' });
         }
-      } else if (table === 'leave_requests') {
-        const fromD = fields.from_date || existing.rows[0].from_date;
-        const toD = fields.to_date || existing.rows[0].to_date;
-        if (fromD && toD && String(toD) < String(fromD)) {
-          return res.status(400).json({ error: 'To date cannot be earlier than from date' });
-        }
       }
+      const updateError = await validateEntity(table, fields, existing.rows[0], req.user!.id);
+      if (updateError) return res.status(400).json({ error: updateError });
 
       const rawKeys = Object.keys(fields);
       if (rawKeys.length === 0) return res.status(400).json({ error: 'No fields' });
@@ -424,8 +494,12 @@ export function createCrudRouter(opts: CrudOptions) {
       if (existing.rows.length === 0) return res.status(404).json({ error: 'Not found' });
 
       const isOwner = safeOwnerCol ? existing.rows[0][safeOwnerCol] === req.user!.id : false;
-      if (!isOwner && !hasPerm(req, deletePermission || updatePermission)) {
+      const canDeleteAny = hasPerm(req, deletePermission || updatePermission);
+      if (!canDeleteAny && (!isOwner || !ownerWrite)) {
         return res.status(403).json({ error: 'Insufficient permissions' });
+      }
+      if (!canDeleteAny && OWNER_EDITABLE_STATUSES[table] && !OWNER_EDITABLE_STATUSES[table].includes(existing.rows[0].status)) {
+        return res.status(403).json({ error: `This request has already been ${existing.rows[0].status} and is kept for the record` });
       }
 
       await query(`DELETE FROM ${safeTable} WHERE id = $1`, [req.params.id]);

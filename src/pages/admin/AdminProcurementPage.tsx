@@ -366,10 +366,10 @@ export default function AdminProcurementPage() {
           <form onSubmit={handleCreateRequest}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-1" className="block text-sm font-medium text-gray-700 mb-1">
                   Product Name <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="prc-field-1"
                   type="text"
                   required
                   value={formData.item_name}
@@ -380,10 +380,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-2" className="block text-sm font-medium text-gray-700 mb-1">
                   Category <span className="text-red-500">*</span>
                 </label>
-                <select
+                <select id="prc-field-2"
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -400,10 +400,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-3" className="block text-sm font-medium text-gray-700 mb-1">
                   Quantity <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="prc-field-3"
                   type="number"
                   required
                   min="1"
@@ -414,10 +414,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-4" className="block text-sm font-medium text-gray-700 mb-1">
                   Estimated Cost (₹) <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="prc-field-4"
                   type="number"
                   required
                   step="0.01"
@@ -430,8 +430,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor Name</label>
-                <input
+                <label htmlFor="prc-field-5" className="block text-sm font-medium text-gray-700 mb-1">Vendor Name</label>
+                <input id="prc-field-5"
                   type="text"
                   value={formData.vendor_name}
                   onChange={(e) => setFormData({ ...formData, vendor_name: e.target.value })}
@@ -441,8 +441,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Link</label>
-                <input
+                <label htmlFor="prc-field-6" className="block text-sm font-medium text-gray-700 mb-1">Link</label>
+                <input id="prc-field-6"
                   type="url"
                   value={formData.link}
                   onChange={(e) => setFormData({ ...formData, link: e.target.value })}
@@ -452,8 +452,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer Part No</label>
-                <input
+                <label htmlFor="prc-field-7" className="block text-sm font-medium text-gray-700 mb-1">Manufacturer Part No</label>
+                <input id="prc-field-7"
                   type="text"
                   value={formData.manufacturer_part_no}
                   onChange={(e) => setFormData({ ...formData, manufacturer_part_no: e.target.value })}
@@ -463,8 +463,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Volume</label>
-                <input
+                <label htmlFor="prc-field-8" className="block text-sm font-medium text-gray-700 mb-1">Volume</label>
+                <input id="prc-field-8"
                   type="text"
                   value={formData.volume}
                   onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
@@ -474,8 +474,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Duration of Consumption</label>
-                <input
+                <label htmlFor="prc-field-9" className="block text-sm font-medium text-gray-700 mb-1">Duration of Consumption</label>
+                <input id="prc-field-9"
                   type="text"
                   value={formData.duration_of_consumption}
                   onChange={(e) => setFormData({ ...formData, duration_of_consumption: e.target.value })}
@@ -485,8 +485,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Project Code</label>
-                <input
+                <label htmlFor="prc-field-10" className="block text-sm font-medium text-gray-700 mb-1">Project Code</label>
+                <input id="prc-field-10"
                   type="text"
                   value={formData.project_code}
                   onChange={(e) => setFormData({ ...formData, project_code: e.target.value })}
@@ -496,10 +496,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div className="md:col-span-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-11" className="block text-sm font-medium text-gray-700 mb-1">
                   Purpose <span className="text-red-500">*</span>
                 </label>
-                <textarea
+                <textarea id="prc-field-11"
                   required
                   rows={3}
                   value={formData.purpose}
@@ -560,10 +560,10 @@ export default function AdminProcurementPage() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-8">
         <div className="flex flex-col md:flex-row gap-4 items-end">
           <div className="flex-1 w-full relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+            <label htmlFor="prc-field-12" className="block text-sm font-medium text-gray-700 mb-1">Search</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
+              <input id="prc-field-12"
                 type="text"
                 value={filters.search}
                 onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
@@ -575,8 +575,8 @@ export default function AdminProcurementPage() {
           
           {hasPermission('approve_procurement') && (
             <div className="flex-1 w-full relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
-              <select
+              <label htmlFor="prc-field-13" className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
+              <select id="prc-field-13"
                 value={filters.user}
                 onChange={(e) => setFilters(prev => ({ ...prev, user: e.target.value }))}
                 className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -590,8 +590,8 @@ export default function AdminProcurementPage() {
           )}
 
           <div className="flex-1 w-full relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Requested Date</label>
-            <input
+            <label htmlFor="prc-field-14" className="block text-sm font-medium text-gray-700 mb-1">Requested Date</label>
+            <input id="prc-field-14"
               type="date"
               value={filters.date}
               onChange={(e) => setFilters(prev => ({ ...prev, date: e.target.value }))}
@@ -600,8 +600,8 @@ export default function AdminProcurementPage() {
           </div>
 
           <div className="flex-1 w-full relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
-            <select
+            <label htmlFor="prc-field-15" className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
+            <select id="prc-field-15"
               value={filters.sortBy}
               onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value }))}
               className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -681,9 +681,9 @@ export default function AdminProcurementPage() {
                   <div>
                     <h3 className="text-lg font-semibold text-gray-900">{request.item_name}</h3>
                     <p className="text-sm text-gray-500">
-                      Requested by {request.user_profiles.full_name}
-                      {request.user_profiles.email ? ` (${request.user_profiles.email})` : ''}
-                      {request.user_profiles.department ? ` - ${request.user_profiles.department}` : ''}
+                      Requested by {request.user_profiles?.full_name}
+                      {request.user_profiles?.email ? ` (${request.user_profiles?.email})` : ''}
+                      {request.user_profiles?.department ? ` - ${request.user_profiles?.department}` : ''}
                     </p>
                   </div>
                 </div>
@@ -852,10 +852,10 @@ export default function AdminProcurementPage() {
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-16" className="block text-sm font-medium text-gray-700 mb-1">
                     Approved Cost (₹)
                   </label>
-                  <input
+                  <input id="prc-field-16"
                     type="number"
                     step="0.01"
                     value={procurementDetails.approved_cost || ''}
@@ -864,10 +864,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-17" className="block text-sm font-medium text-gray-700 mb-1">
                     PO Number
                   </label>
-                  <input
+                  <input id="prc-field-17"
                     type="text"
                     value={procurementDetails.po_number}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, po_number: e.target.value })}
@@ -875,10 +875,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-18" className="block text-sm font-medium text-gray-700 mb-1">
                     Vendor Contact
                   </label>
-                  <input
+                  <input id="prc-field-18"
                     type="text"
                     value={procurementDetails.vendor_contact}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, vendor_contact: e.target.value })}
@@ -886,10 +886,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-19" className="block text-sm font-medium text-gray-700 mb-1">
                     Order Date
                   </label>
-                  <input
+                  <input id="prc-field-19"
                     type="date"
                     value={procurementDetails.order_date}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, order_date: e.target.value })}
@@ -897,10 +897,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-20" className="block text-sm font-medium text-gray-700 mb-1">
                     Expected Delivery Date
                   </label>
-                  <input
+                  <input id="prc-field-20"
                     type="date"
                     value={procurementDetails.expected_delivery_date}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, expected_delivery_date: e.target.value })}
@@ -908,10 +908,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-21" className="block text-sm font-medium text-gray-700 mb-1">
                     Dispatch Date
                   </label>
-                  <input
+                  <input id="prc-field-21"
                     type="date"
                     value={procurementDetails.dispatch_date}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, dispatch_date: e.target.value })}
@@ -919,10 +919,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-22" className="block text-sm font-medium text-gray-700 mb-1">
                     Tracking ID
                   </label>
-                  <input
+                  <input id="prc-field-22"
                     type="text"
                     value={procurementDetails.tracking_id}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, tracking_id: e.target.value })}
@@ -930,10 +930,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-23" className="block text-sm font-medium text-gray-700 mb-1">
                     Remarks
                   </label>
-                  <textarea
+                  <textarea id="prc-field-23"
                     rows={3}
                     value={procurementDetails.remarks}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, remarks: e.target.value })}
@@ -973,8 +973,8 @@ export default function AdminProcurementPage() {
               Update status for: <span className="font-semibold">{selectedRequest.item_name}</span>
             </p>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">New Status</label>
-              <select
+              <label htmlFor="prc-field-24" className="block text-sm font-medium text-gray-700 mb-2">New Status</label>
+              <select id="prc-field-24"
                 value={newStatus}
                 onChange={(e) => setNewStatus(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -1185,12 +1185,12 @@ export default function AdminProcurementPage() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 mb-1">Requested By</p>
-                  <p className="text-gray-900 font-medium">{selectedRequest.user_profiles.full_name}</p>
-                  {selectedRequest.user_profiles.email && (
-                    <p className="text-sm text-gray-600 mt-1">Email: {selectedRequest.user_profiles.email}</p>
+                  <p className="text-gray-900 font-medium">{selectedRequest.user_profiles?.full_name}</p>
+                  {selectedRequest.user_profiles?.email && (
+                    <p className="text-sm text-gray-600 mt-1">Email: {selectedRequest.user_profiles?.email}</p>
                   )}
-                  {selectedRequest.user_profiles.department && (
-                    <p className="text-sm text-gray-600 mt-1">Department: {selectedRequest.user_profiles.department}</p>
+                  {selectedRequest.user_profiles?.department && (
+                    <p className="text-sm text-gray-600 mt-1">Department: {selectedRequest.user_profiles?.department}</p>
                   )}
                 </div>
               </div>

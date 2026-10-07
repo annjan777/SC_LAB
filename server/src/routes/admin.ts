@@ -21,7 +21,14 @@ function isValidPassword(password: string): boolean {
 // POST /api/admin/users - create user (admin creating a user)
 router.post('/users', authenticate, requirePermission('manage_users'), async (req: Request, res: Response) => {
   try {
-    const { email, password, full_name, role, role_id, phone } = req.body;
+    const { email, password, role, role_id, phone } = req.body;
+    const full_name = typeof req.body.full_name === 'string' ? req.body.full_name.trim().replace(/\s+/g, ' ') : '';
+    if (!full_name) {
+      return res.status(400).json({ error: 'Full name is required' });
+    }
+    if (full_name.length > 150) {
+      return res.status(400).json({ error: 'Full name must be 150 characters or fewer' });
+    }
     
     // Validate email domain and format
     const emailValidation = validateEmail(email);
@@ -72,6 +79,13 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
     if (resolvedRoleName.toLowerCase() === 'admin') {
       return res.status(400).json({ error: 'Admin accounts cannot be created directly. Create the user first, then promote them to Admin from Settings.' });
     }
+    const callerIsAdmin = ['admin', 'super_admin'].includes(req.user!.user_role);
+    if (!callerIsAdmin && resolvedRoleName.toLowerCase() !== 'user') {
+      return res.status(403).json({ error: 'Only administrators can create users with a role other than the default member role' });
+    }
+    if (resolvedRoleName.toLowerCase() === 'super_admin') {
+      return res.status(400).json({ error: 'Super admin accounts cannot be created from the portal' });
+    }
 
     const userResult = await query(
       'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
@@ -82,21 +96,34 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
     await query(
       `INSERT INTO user_profiles (id, full_name, email, phone, user_role, role_id, require_password_change, is_profile_completed, temp_password_expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, true, false, NOW() + INTERVAL '24 hours')`,
-      [userId, full_name || 'New User', cleanEmail, cleanPhone, resolvedRoleName.toLowerCase(), resolvedRoleId]
+      [userId, full_name, cleanEmail, cleanPhone, tierForRole(resolvedRoleName), resolvedRoleId]
     );
 
-    sendTempPasswordEmail(cleanEmail, full_name || 'New User', generatedPassword).then(emailResult => {
-      if (!emailResult.success) {
+    // Report the real delivery result so the admin knows whether to share the temporary password manually.
+    let emailSent = false;
+    let emailError: string | undefined;
+    try {
+      const emailResult: any = await Promise.race([
+        sendTempPasswordEmail(cleanEmail, full_name, generatedPassword),
+        new Promise(resolve => setTimeout(() => resolve({ success: false, error: 'Email server did not respond in time' }), 15000)),
+      ]);
+      emailSent = Boolean(emailResult?.success);
+      if (!emailSent) {
+        emailError = emailResult?.error ? String(emailResult.error) : 'Email could not be sent';
         console.warn(`[ADMIN] Failed to dispatch temporary password email to ${cleanEmail}`);
       }
-    }).catch(err => console.error('Background email error:', err));
+    } catch (mailErr: any) {
+      emailError = mailErr?.message || 'Email could not be sent';
+      console.error('Temporary password email error:', mailErr);
+    }
 
     const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
     res.status(201).json({
       ...profileResult.rows[0],
+      // Shown once to the admin in the Add User dialog (needed when email delivery fails).
       password: generatedPassword,
-      email_sent: true,
-      email_error: undefined,
+      email_sent: emailSent,
+      email_error: emailError,
     });
   } catch (err: any) {
     console.error(err); res.status(500).json({ error: 'Internal Server Error' });
@@ -324,6 +351,7 @@ router.get('/users/:id/permissions', authenticate, requirePermission('manage_rol
 });
 
 import { logAuditEvent } from '../services/auditLogger.js';
+import { tierForRole } from '../utils/roleTier.js';
 
 // PUT /api/admin/users/:id/permissions
 router.put('/users/:id/permissions', authenticate, requirePermission('manage_roles'), async (req: Request, res: Response) => {
@@ -339,9 +367,9 @@ router.put('/users/:id/permissions', authenticate, requirePermission('manage_rol
         }
         resolvedRoleId = r.rows[0].id;
       }
-      await query('UPDATE user_profiles SET user_role = $1, role_id = COALESCE($2, role_id) WHERE id = $3', [user_role, resolvedRoleId, req.params.id]);
+      await query('UPDATE user_profiles SET user_role = $1, role_id = COALESCE($2, role_id) WHERE id = $3', [tierForRole(user_role), resolvedRoleId, req.params.id]);
     } else if (role_id !== undefined) {
-      await query('UPDATE user_profiles SET role_id = $1 WHERE id = $2', [role_id, req.params.id]);
+      await query("UPDATE user_profiles up SET role_id = r.id, user_role = CASE WHEN LOWER(r.name) IN ('super_admin','admin','lab_manager','researcher','student','guest','user') THEN LOWER(r.name) ELSE 'user' END FROM roles r WHERE r.id = $1 AND up.id = $2", [role_id, req.params.id]);
     }
     if (pids !== undefined && Array.isArray(pids)) {
       await query('DELETE FROM user_permissions WHERE user_id = $1', [req.params.id]);
@@ -356,12 +384,20 @@ router.put('/users/:id/permissions', authenticate, requirePermission('manage_rol
       const rolePermsRes = await query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [targetRoleId]);
       const rolePermIds = rolePermsRes.rows.map(r => r.permission_id);
 
-      // Determine explicit grants (checked but not inherited)
-      const grantedPerms = pids.filter(id => !rolePermIds.includes(id));
+      // Explicit grants (ticked but not inherited from the role) and revocations
+      // (inherited from the role but unticked for this user).
+      const grantedPerms = pids.filter((id: string) => !rolePermIds.includes(id));
+      const revokedPerms = rolePermIds.filter((id: string) => !pids.includes(id));
 
       for (const pid of grantedPerms) {
         await query(
-          'INSERT INTO user_permissions (user_id, permission_id, granted_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING',
+          'INSERT INTO user_permissions (user_id, permission_id, granted_by, granted) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING',
+          [req.params.id, pid, req.user!.id]
+        );
+      }
+      for (const pid of revokedPerms) {
+        await query(
+          'INSERT INTO user_permissions (user_id, permission_id, granted_by, granted) VALUES ($1, $2, $3, false) ON CONFLICT DO NOTHING',
           [req.params.id, pid, req.user!.id]
         );
       }
@@ -449,8 +485,40 @@ router.get('/purchase-requests', authenticate, requirePermission('view_procureme
   }
 });
 
+
+// --- Status transition guards (match the transitions the UI offers) ---
+const PR_STATUS_FLOW: Record<string, string[]> = {
+  approved: ['ordered', 'in_transit', 'received'],
+  ordered: ['in_transit', 'received'],
+  in_transit: ['received'],
+  received: ['added_to_inventory'],
+};
+const PR_APPROVABLE = ['draft', 'submitted', 'rejected'];
+const PR_REJECTABLE = ['draft', 'submitted', 'approved'];
+const PR_PROCUREMENT_STAGES = ['approved', 'ordered', 'in_transit', 'received', 'added_to_inventory'];
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function loadPurchaseRequest(id: string, res: Response): Promise<any | null> {
+  if (!UUID_RE.test(id)) { res.status(400).json({ error: 'Invalid purchase request id' }); return null; }
+  const r = await query('SELECT * FROM purchase_requests WHERE id = $1', [id]);
+  if (r.rows.length === 0) { res.status(404).json({ error: 'Purchase request not found' }); return null; }
+  return r.rows[0];
+}
+
+async function loadLeaveRequest(id: string, res: Response): Promise<any | null> {
+  if (!UUID_RE.test(id)) { res.status(400).json({ error: 'Invalid leave request id' }); return null; }
+  const r = await query('SELECT * FROM leave_requests WHERE id = $1', [id]);
+  if (r.rows.length === 0) { res.status(404).json({ error: 'Leave request not found' }); return null; }
+  return r.rows[0];
+}
+
 router.put('/purchase-requests/:id/approve', authenticate, requirePermission('approve_procurement'), async (req: Request, res: Response) => {
   try {
+    const current = await loadPurchaseRequest(req.params.id, res);
+    if (!current) return;
+    if (!PR_APPROVABLE.includes(current.status)) {
+      return res.status(400).json({ error: `A request that is '${current.status}' cannot be approved` });
+    }
     const result = await query(
       `UPDATE purchase_requests
        SET status = 'approved', approved_by = $1, approved_at = now(), rejection_reason = NULL
@@ -480,6 +548,11 @@ router.put('/purchase-requests/:id/approve', authenticate, requirePermission('ap
 
 router.put('/purchase-requests/:id/reject', authenticate, requirePermission('approve_procurement'), async (req: Request, res: Response) => {
   try {
+    const current = await loadPurchaseRequest(req.params.id, res);
+    if (!current) return;
+    if (!PR_REJECTABLE.includes(current.status)) {
+      return res.status(400).json({ error: `A request that is '${current.status}' can no longer be rejected` });
+    }
     const result = await query(
       `UPDATE purchase_requests
        SET status = 'rejected', approved_by = $1, approved_at = now(), rejection_reason = $2
@@ -509,6 +582,17 @@ router.put('/purchase-requests/:id/reject', authenticate, requirePermission('app
 
 router.put('/purchase-requests/:id/status', authenticate, requirePermission('approve_procurement'), async (req: Request, res: Response) => {
   try {
+    const current = await loadPurchaseRequest(req.params.id, res);
+    if (!current) return;
+    const next = req.body?.status;
+    const allowed = PR_STATUS_FLOW[current.status] || [];
+    if (typeof next !== 'string' || !allowed.includes(next)) {
+      return res.status(400).json({
+        error: allowed.length
+          ? `Status can move from '${current.status}' to: ${allowed.join(', ')}`
+          : `No further status changes are possible from '${current.status}'`,
+      });
+    }
     const result = await query(
       `UPDATE purchase_requests
        SET status = $1, approved_by = $2, approved_at = CASE WHEN $1 = 'approved' THEN now() ELSE approved_at END
@@ -550,6 +634,15 @@ router.get('/purchase-requests/:id/procurement', authenticate, requirePermission
 
 router.post('/purchase-requests/:id/procurement', authenticate, requirePermission('manage_procurement'), async (req: Request, res: Response) => {
   try {
+    const current = await loadPurchaseRequest(req.params.id, res);
+    if (!current) return;
+    if (!PR_PROCUREMENT_STAGES.includes(current.status)) {
+      return res.status(400).json({ error: 'Procurement details can only be recorded after the request is approved' });
+    }
+    if (req.body.approved_cost !== undefined && req.body.approved_cost !== null && req.body.approved_cost !== '' &&
+        (isNaN(Number(req.body.approved_cost)) || Number(req.body.approved_cost) < 0)) {
+      return res.status(400).json({ error: 'Approved cost must be a number of 0 or more' });
+    }
     const existing = await query(
       'SELECT id FROM procurement_details WHERE purchase_request_id = $1 ORDER BY created_at DESC LIMIT 1',
       [req.params.id]
@@ -600,6 +693,11 @@ router.post('/purchase-requests/:id/procurement', authenticate, requirePermissio
 
 router.put('/leave-requests/:id/approve', authenticate, requirePermission('approve_leaves'), async (req: Request, res: Response) => {
   try {
+    const current = await loadLeaveRequest(req.params.id, res);
+    if (!current) return;
+    if (current.status !== 'pending') {
+      return res.status(400).json({ error: `This leave request is already ${current.status}` });
+    }
     const result = await query(
       `UPDATE leave_requests
        SET status = 'approved', approved_by = $1, approved_at = now(), admin_remarks = NULL
@@ -629,6 +727,11 @@ router.put('/leave-requests/:id/approve', authenticate, requirePermission('appro
 
 router.put('/leave-requests/:id/reject', authenticate, requirePermission('approve_leaves'), async (req: Request, res: Response) => {
   try {
+    const current = await loadLeaveRequest(req.params.id, res);
+    if (!current) return;
+    if (current.status !== 'pending') {
+      return res.status(400).json({ error: `This leave request is already ${current.status}` });
+    }
     const result = await query(
       `UPDATE leave_requests
        SET status = 'rejected', approved_by = $1, approved_at = now(), admin_remarks = $2

@@ -75,6 +75,9 @@ router.post('/:id/bookings', authenticate, async (req: Request, res: Response) =
     if (endDate <= startDate) {
       return res.status(400).json({ error: 'End time must be after start time' });
     }
+    if (startDate.getTime() < Date.now() - 5 * 60 * 1000) {
+      return res.status(400).json({ error: 'Bookings cannot start in the past' });
+    }
 
     const booking = await transaction(async (client) => {
       // 1. Lock equipment row to serialize concurrent booking requests for this item
@@ -166,6 +169,9 @@ router.put('/bookings/:bookingId/cancel', authenticate, async (req: Request, res
     const booking = bookingCheck.rows[0];
     if (booking.user_id !== userId && !isManager) {
       return res.status(403).json({ error: 'You do not have permission to cancel this equipment booking' });
+    }
+    if (booking.status === 'cancelled') {
+      return res.status(400).json({ error: 'This booking is already cancelled' });
     }
 
     await query(

@@ -297,12 +297,6 @@ export async function ensureOperationalSchema(): Promise<void> {
       ('manage_equipment_bookings', 'Manage Equipment Bookings', 'Can view, edit, or cancel any equipment booking', 'inventory')
     ON CONFLICT (name) DO NOTHING;
 
-    -- Grant booking permissions to all roles
-    INSERT INTO role_permissions (role_id, permission_id)
-    SELECT r.id, p.id
-    FROM roles r
-    JOIN permissions p ON p.name IN ('book_facilities', 'book_equipment')
-    ON CONFLICT DO NOTHING;
 
     -- Grant booking management to admin, super_admin, and lab_manager
     INSERT INTO role_permissions (role_id, permission_id)
@@ -374,11 +368,6 @@ export async function ensureOperationalSchema(): Promise<void> {
       ('manage_inventory_requests', 'Manage Inventory Requests', 'Can approve, issue, and process returns of inventory items', 'inventory')
     ON CONFLICT (name) DO NOTHING;
 
-    INSERT INTO role_permissions (role_id, permission_id)
-    SELECT r.id, p.id
-    FROM roles r
-    JOIN permissions p ON p.name = 'request_inventory'
-    ON CONFLICT DO NOTHING;
 
     INSERT INTO role_permissions (role_id, permission_id)
     SELECT r.id, p.id
@@ -493,12 +482,50 @@ export async function ensureOperationalSchema(): Promise<void> {
     WHERE LOWER(r.name) IN ('admin', 'super_admin')
     ON CONFLICT DO NOTHING;
 
-    -- Assign default read & achievement permissions to user role
-    INSERT INTO role_permissions (role_id, permission_id)
-    SELECT r.id, p.id
-    FROM roles r
-    JOIN permissions p ON p.name IN ('view_projects', 'add_project_achievement')
-    WHERE LOWER(r.name) = 'user'
-    ON CONFLICT DO NOTHING;
+  `);
+
+  // Default grants for non-admin roles run ONCE per database. Running them on every boot silently
+  // re-added permissions that an administrator had removed in Settings.
+  await query(`CREATE TABLE IF NOT EXISTS app_migrations (key text PRIMARY KEY, applied_at timestamptz DEFAULT now())`);
+  const defaultsApplied = await query(`SELECT 1 FROM app_migrations WHERE key = 'default_role_grants_v1'`);
+  if (defaultsApplied.rows.length === 0) {
+    await query(`
+      INSERT INTO role_permissions (role_id, permission_id)
+      SELECT r.id, p.id FROM roles r
+      JOIN permissions p ON p.name IN ('book_facilities', 'book_equipment', 'request_inventory')
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO role_permissions (role_id, permission_id)
+      SELECT r.id, p.id FROM roles r
+      JOIN permissions p ON p.name IN ('view_projects', 'add_project_achievement')
+      WHERE LOWER(r.name) = 'user'
+      ON CONFLICT DO NOTHING;
+
+      INSERT INTO app_migrations (key) VALUES ('default_role_grants_v1') ON CONFLICT DO NOTHING;
+    `);
+  }
+
+  // Per-user permission overrides can now REVOKE a role permission (granted = false), not only add one.
+  await query(`
+    ALTER TABLE user_permissions ADD COLUMN IF NOT EXISTS granted boolean NOT NULL DEFAULT true;
+
+    CREATE OR REPLACE FUNCTION get_user_permissions(user_uuid uuid)
+    RETURNS TABLE(permission_name text) AS $fn$
+    BEGIN
+      RETURN QUERY
+      SELECT p.name FROM user_permissions up
+      JOIN permissions p ON p.id = up.permission_id
+      WHERE up.user_id = user_uuid AND up.granted = true
+      UNION
+      SELECT p.name FROM user_profiles prof
+      JOIN role_permissions rp ON rp.role_id = prof.role_id
+      JOIN permissions p ON p.id = rp.permission_id
+      WHERE prof.id = user_uuid
+      EXCEPT
+      SELECT p.name FROM user_permissions up
+      JOIN permissions p ON p.id = up.permission_id
+      WHERE up.user_id = user_uuid AND up.granted = false;
+    END;
+    $fn$ LANGUAGE plpgsql;
   `);
 }
