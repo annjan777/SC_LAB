@@ -156,13 +156,13 @@ router.put('/:id', authenticate, captureCurrentPassword, validateBody(updateUser
   try {
     const isCallerAdmin = req.user!.user_role === 'admin' || req.user!.user_role === 'super_admin';
     const isOwner = req.user!.id === req.params.id;
-    // Holders of manage_users (e.g. a custom "Coordinator" role) may edit other users' profiles,
-    // but only administrators may change roles or touch administrator accounts.
-    const canManageUsers = isCallerAdmin || req.user!.permissions.has('manage_users');
+    // Only administrators may edit someone else's profile. A permission grant (for example
+    // manage_users given to a member role in Settings) is not enough on its own.
+    const canManageUsers = isCallerAdmin;
 
-    // Users can update their own profile; admins / user managers can update others
+    // Users can update their own profile; only administrators can update others
     if (!isOwner && !canManageUsers) {
-      return res.status(403).json({ error: 'Forbidden' });
+      return res.status(403).json({ error: 'You can only edit your own profile' });
     }
     const targetRes = await query('SELECT user_role, role_id, is_active, email FROM user_profiles WHERE id = $1', [req.params.id]);
     if (targetRes.rows.length === 0) return res.status(404).json({ error: 'User not found' });

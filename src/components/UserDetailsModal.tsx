@@ -117,14 +117,15 @@ export default function UserDetailsModal({
   onClose,
   onUserUpdated,
 }: UserDetailsModalProps) {
+  const { profile } = useAuth();
+  // Only the person themselves or an administrator may edit a profile (the server enforces the same rule)
+  const canEdit = profile?.user_role === 'admin' || profile?.user_role === 'super_admin' || profile?.id === user.id;
+
   const [currentUser, setCurrentUser] = useState<UserProfile>(user);
-  const [isEditing, setIsEditing] = useState(initialEditMode);
+  const [isEditing, setIsEditing] = useState(initialEditMode && canEdit);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  
-  const { profile } = useAuth();
-  const canEdit = profile?.user_role === 'admin' || profile?.user_role === 'super_admin' || profile?.id === user.id;
 
   // Form state
   const [formData, setFormData] = useState({
@@ -242,6 +243,11 @@ export default function UserDetailsModal({
     e.preventDefault();
     setError(null);
     setSuccessMessage(null);
+
+    if (!canEdit) {
+      setError('You can only edit your own profile.');
+      return;
+    }
 
     if (!formData.full_name.trim()) {
       setError('Full Name cannot be empty');
@@ -1103,18 +1109,20 @@ export default function UserDetailsModal({
             </div>
           ) : (
             <div className="flex items-center justify-between w-full">
-              <button
-                type="button"
-                onClick={() => {
-                  setError(null);
-                  setSuccessMessage(null);
-                  setIsEditing(true);
-                }}
-                className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-semibold transition"
-              >
-                <Edit2 className="w-3.5 h-3.5" />
-                <span>Edit User Details</span>
-              </button>
+              {canEdit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setError(null);
+                    setSuccessMessage(null);
+                    setIsEditing(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 px-4 py-2 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200 rounded-lg text-xs font-semibold transition"
+                >
+                  <Edit2 className="w-3.5 h-3.5" />
+                  <span>Edit User Details</span>
+                </button>
+              ) : <span />}
               <button
                 onClick={onClose}
                 className="px-6 py-2 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 text-xs font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 transition"
