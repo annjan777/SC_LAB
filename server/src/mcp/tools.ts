@@ -578,11 +578,7 @@ export function registerTools(server: McpServer) {
   });
 
   const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-  tool('create_project', {
-    title: 'Create a project',
-    description: 'Adds a project to the lab project tracker (needs the create_projects permission). Tracker ID is generated automatically. Dates are YYYY-MM-DD. team is a list of {name} for external people or {id, name, email} for lab members.',
-    inputSchema: {
-      project_title: z.string().min(1).max(255),
+  const projectFields = {
       project_code: z.string().max(100).optional(),
       funding_agency: z.string().max(255).optional(),
       proposal_link: z.string().optional(),
@@ -603,9 +599,117 @@ export function registerTools(server: McpServer) {
       open_actions: z.number().int().min(0).optional(),
       overdue_actions: z.number().int().min(0).optional(),
       staff_on_payroll: z.string().max(100).optional(),
-    },
+  };
+
+  tool('create_project', {
+    title: 'Create a project',
+    description: 'Adds a project to the lab project tracker (needs the create_projects permission). Tracker ID is generated automatically. Dates are YYYY-MM-DD. team is a list of {name} for external people or {id, name, email} for lab members (ids from list_lab_members).',
+    inputSchema: { project_title: z.string().min(1).max(255), ...projectFields },
     annotations: WRITE,
   }, async (a, c) => api(c, 'POST', '/api/projects', { body: a }));
+
+  tool('update_project', {
+    title: 'Edit a project',
+    description: 'Changes fields of an existing project (id from list_projects scope "all"; needs edit_projects). Only the fields given are changed. Tracker ID cannot be changed. team, when given, replaces the whole team list.',
+    inputSchema: { project_id: id, project_title: z.string().min(1).max(255).optional(), ...projectFields },
+    annotations: WRITE,
+  }, async ({ project_id, ...rest }, c) => api(c, 'PUT', `/api/projects/${project_id}`, { body: rest }));
+
+  // ------------------------------------------------------------------ Lab members
+
+  tool('list_lab_members', {
+    title: 'List lab members',
+    description: 'Lists SC Lab members (id, name, email, role, designation, project) so their ids can be used for project teams, facility owners or inventory assignment.',
+    inputSchema: { search: z.string().optional() },
+    annotations: READ,
+  }, async (a, c) => {
+    const rows: any[] = await api(c, 'GET', '/api/users');
+    const s = (a.search || '').trim().toLowerCase();
+    return rows
+      .filter((u) => !s || `${u.full_name} ${u.email}`.toLowerCase().includes(s))
+      .map((u) => ({ id: u.id, full_name: u.full_name, email: u.email, user_role: u.user_role, designation: u.designation, project_name: u.project_name, is_active: u.is_active }));
+  });
+
+  // ------------------------------------------------------------------ Facilities (admin)
+
+  const facilityFields = {
+    description: z.string().optional(),
+    status: z.enum(['operational', 'under_maintenance', 'out_of_order', 'decommissioned']).optional(),
+    category: z.string().optional(),
+    responsible_person_id: id.optional(),
+    assigned_to_user_id: id.optional(),
+    make_model: z.string().optional(),
+    model_number: z.string().optional(),
+    manufacturer: z.string().optional(),
+    serial_number: z.string().optional(),
+    asset_tag: z.string().optional(),
+    installation_date: isoDate.optional(),
+    warranty_end_date: isoDate.optional(),
+    last_maintenance_date: isoDate.optional(),
+    next_maintenance_date: isoDate.optional(),
+    user_manual_url: z.string().optional(),
+    vendor_name: z.string().optional(),
+    vendor_contact: z.string().optional(),
+    specifications: z.record(z.string(), z.unknown()).optional(),
+    usage_guidelines: z.string().optional(),
+    safety_requirements: z.string().optional(),
+    booking_required: z.boolean().optional(),
+    max_booking_hours: z.number().int().positive().optional(),
+    capacity: z.number().int().positive().optional(),
+    features: z.array(z.string()).optional(),
+    project_code: z.string().optional(),
+    funded_by: z.string().optional(),
+  };
+
+  tool('create_facility', {
+    title: 'Add a facility',
+    description: 'Adds a lab facility (room, instrument or shared resource) that members can book. Needs the create_facilities permission. Responsible person ids come from list_lab_members.',
+    inputSchema: { name: z.string().min(1), location: z.string().min(1), ...facilityFields },
+    annotations: WRITE,
+  }, async (a, c) => api(c, 'POST', '/api/facilities', { body: a }));
+
+  tool('update_facility', {
+    title: 'Edit a facility',
+    description: 'Changes fields of an existing facility (id from list_facilities; needs edit_facilities). Only the fields given are changed.',
+    inputSchema: { facility_id: id, name: z.string().min(1).optional(), location: z.string().min(1).optional(), ...facilityFields },
+    annotations: WRITE,
+  }, async ({ facility_id, ...rest }, c) => api(c, 'PUT', `/api/facilities/${facility_id}`, { body: rest }));
+
+  // ------------------------------------------------------------------ Inventory (admin)
+
+  const inventoryFields = {
+    serial_number: z.string().optional(),
+    asset_tag: z.string().optional(),
+    quantity: z.number().int().min(0).optional(),
+    location: z.string().optional(),
+    condition: z.enum(['new', 'good', 'fair', 'poor', 'damaged']).optional(),
+    classification: z.enum(['Equipment', 'Consumables']).optional(),
+    status: z.enum(['available', 'assigned', 'in_use', 'maintenance', 'retired']).optional(),
+    facility_id: id.optional(),
+    assigned_to_user_id: id.optional(),
+    po_number: z.string().optional(),
+    vendor_name: z.string().optional(),
+    purchased_by: z.string().optional(),
+    expiry_date: isoDate.optional(),
+    is_returnable: z.boolean().optional(),
+    expected_return_date: isoDate.optional(),
+    warranty_end_date: isoDate.optional(),
+    last_maintenance_date: isoDate.optional(),
+  };
+
+  tool('create_inventory_item', {
+    title: 'Add an inventory item',
+    description: 'Adds equipment or consumables to the lab inventory catalog. Needs the create_inventory permission. location defaults to "Main Lab"; classification to Equipment.',
+    inputSchema: { item_name: z.string().min(1), category: z.string().min(1), ...inventoryFields },
+    annotations: WRITE,
+  }, async (a, c) => api(c, 'POST', '/api/inventory', { body: a }));
+
+  tool('update_inventory_item', {
+    title: 'Edit an inventory item',
+    description: 'Changes fields of an existing inventory item (id from search_inventory; needs edit_inventory), e.g. stock quantity, status, condition or location. Only the fields given are changed.',
+    inputSchema: { item_id: id, item_name: z.string().min(1).optional(), category: z.string().min(1).optional(), ...inventoryFields },
+    annotations: WRITE,
+  }, async ({ item_id, ...rest }, c) => api(c, 'PUT', `/api/inventory/${item_id}`, { body: rest }));
 
   tool('add_project_achievement', {
     title: 'Post a project achievement',
