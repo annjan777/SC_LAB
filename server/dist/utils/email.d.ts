@@ -33,4 +33,12 @@ export declare function sendBroadcastEmails(options: BroadcastEmailOptions): Pro
     failCount: number;
 }>;
 export declare function sendSkillReminderEmail(to: string, recipientName: string, profileUrl?: string): Promise<SendResult>;
+export declare function sendEquipmentReturnReminderEmail(params: {
+    to: string;
+    recipientName: string;
+    itemName: string;
+    assetTag?: string;
+    dueDate: string;
+    isOverdue?: boolean;
+}): Promise<SendResult>;
 export {};

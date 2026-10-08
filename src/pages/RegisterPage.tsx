@@ -45,7 +45,7 @@ export default function RegisterPage() {
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-2xl p-8">
           <div className="flex justify-center mb-6">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-40" />
+            <img src="/logo.png" alt="SC Lab Logo" className="brand-logo h-36 max-h-40 w-auto object-contain" />
           </div>
 
           <h1 className="text-3xl font-bold text-center text-gray-900 mb-2">Create Account</h1>

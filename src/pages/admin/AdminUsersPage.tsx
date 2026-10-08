@@ -84,6 +84,20 @@ import UserDetailsModal from '../../components/UserDetailsModal';
 import DeleteUserModal from '../../components/DeleteUserModal';
 import EditUserPermissionsModal from '../../components/EditUserPermissionsModal';
 import AdvancedSearchFilters, { SearchFilters } from '../../components/AdvancedSearchFilters';
+import {
+  PageHeader,
+  Button,
+  Select,
+  TableContainer,
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  StatusBadge,
+  EmptyState,
+} from '../../components/ui';
 
 export default function AdminUsersPage() {
   const [users, setUsers] = useState<UserProfile[]>([]);
@@ -446,267 +460,255 @@ export default function AdminUsersPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Manage Users</h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">View and manage lab members</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <button
-            onClick={exportUsersToCSV}
-            title={
-              filteredUsers.length === users.length
-                ? `Export all ${users.length} users as CSV`
-                : `Export ${filteredUsers.length} filtered user(s) as CSV`
-            }
-            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export CSV</span>
-          </button>
-          <button
-            onClick={() => setShowBroadcastModal(true)}
-            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
-          >
-            <Send className="w-4 h-4" />
-            <span>Broadcast</span>
-          </button>
-          <button
-            onClick={() => setShowBulkImportModal(true)}
-            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-green-600 text-white rounded-lg hover:bg-green-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
-          >
-            <Upload className="w-4 h-4" />
-            <span>Bulk Import</span>
-          </button>
-          <button
-            onClick={() => setShowAddUserModal(true)}
-            className="px-3 sm:px-4 py-2 text-xs sm:text-sm font-medium bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center gap-1.5 sm:gap-2 shadow-sm"
-          >
-            <UserPlus className="w-4 h-4" />
-            <span>Add User</span>
-          </button>
-        </div>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Manage Users"
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={exportUsersToCSV}
+              leftIcon={<Download className="w-4 h-4" />}
+              title={
+                filteredUsers.length === users.length
+                  ? `Export all ${users.length} users as CSV`
+                  : `Export ${filteredUsers.length} filtered user(s) as CSV`
+              }
+            >
+              Export CSV
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowBroadcastModal(true)}
+              leftIcon={<Send className="w-4 h-4" />}
+            >
+              Broadcast
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowBulkImportModal(true)}
+              leftIcon={<Upload className="w-4 h-4" />}
+            >
+              Bulk Import
+            </Button>
+            <Button
+              size="sm"
+              variant="primary"
+              onClick={() => setShowAddUserModal(true)}
+              leftIcon={<UserPlus className="w-4 h-4" />}
+            >
+              Add User
+            </Button>
+          </div>
+        }
+      />
 
       {message && (
         <div
-          className={`mb-6 p-4 rounded-lg ${
+          className={`p-4 rounded-xl border ${
             message.type === 'success'
-              ? 'bg-green-50 border border-green-200 text-green-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
+              ? 'bg-green-50 dark:bg-emerald-950/40 border-green-200 dark:border-emerald-800 text-green-800 dark:text-emerald-300'
+              : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
           }`}
         >
           {message.text}
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 sm:p-6 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-            <div className="md:col-span-2">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  placeholder="Search by name, roll number, employee ID, department, or supervisor..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-            </div>
-
-            <div>
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value)}
-                className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="all">All Roles</option>
-                <option value="admin">Admin</option>
-                <option value="user">User</option>
-              </select>
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+          <div className="md:col-span-2">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-slate-500 w-5 h-5" />
+              <input
+                type="text"
+                placeholder="Search by name, roll number, employee ID, department, or supervisor..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full h-10 pl-10 pr-4 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm placeholder-gray-400 dark:placeholder-slate-500 transition"
+              />
             </div>
           </div>
 
-          <AdvancedSearchFilters
-            filters={advancedFilters}
-            onChange={setAdvancedFilters}
-            defaultExpanded={true}
-          />
-
-          <div className="flex items-center space-x-4 text-sm text-gray-600 mt-4">
-            <span>
-              Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> users
-            </span>
+          <div>
+            <Select
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+            >
+              <option value="all">All Roles</option>
+              <option value="admin">Admin</option>
+              <option value="user">User</option>
+            </Select>
           </div>
         </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('full_name')}
-                >
-                  Name {getSortIcon('full_name')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('program_designation')}
-                >
-                  Designation {getSortIcon('program_designation')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('email')}
-                >
-                  Email ID {getSortIcon('email')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('phone')}
-                >
-                  Contact No. {getSortIcon('phone')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('user_role')}
-                >
-                  Role {getSortIcon('user_role')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('is_active')}
-                >
-                  Status {getSortIcon('is_active')}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Action
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                    No users match your search criteria
-                  </td>
-                </tr>
-              ) : (
-                filteredUsers.map((user) => (
-                  <tr
-                    key={user.id}
-                    onClick={() => handleViewUserDetails(user)}
-                    className="hover:bg-gray-50 transition cursor-pointer"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center mr-3">
-                          <span className="text-blue-700 font-medium">
-                            {user.full_name?.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                        <p className="font-medium text-gray-900">{user.full_name}</p>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                      {user.program_designation || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-gray-700">
-                      {user.email || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                      {user.phone || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium capitalize ${
-                          user.user_role === 'admin'
-                            ? 'bg-gray-100 text-gray-800'
-                            : 'bg-blue-100 text-blue-800'
-                        }`}
-                      >
-                        {user.user_role}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          user.is_active
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
-                      >
-                        {user.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <div className="flex items-center gap-2">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewUserDetails(user, false);
-                          }}
-                          className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                          title="View details"
-                        >
-                          <Eye className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleViewUserDetails(user, true);
-                          }}
-                          className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-lg transition"
-                          title="Edit user details"
-                        >
-                          <Edit2 className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedUser(user);
-                            setShowPermissionsModal(true);
-                          }}
-                          className="p-2 text-gray-600 hover:bg-gray-50 rounded-lg transition"
-                          title="Edit permissions"
-                        >
-                          <Shield className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedUser(user);
-                            setShowResetPasswordModal(true);
-                          }}
-                          className="p-2 text-orange-600 hover:bg-orange-50 rounded-lg transition"
-                          title="Reset password"
-                        >
-                          <Key className="w-5 h-5" />
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedUser(user);
-                            setShowDeleteModal(true);
-                          }}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
-                          title="Delete user"
-                        >
-                          <Trash2 className="w-5 h-5" />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+        <AdvancedSearchFilters
+          filters={advancedFilters}
+          onChange={setAdvancedFilters}
+          defaultExpanded={true}
+        />
+
+        <div className="flex items-center space-x-4 text-xs text-gray-500 dark:text-slate-400 mt-4">
+          <span>
+            Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> users
+          </span>
         </div>
       </div>
+
+      <TableContainer>
+        <Table>
+          <TableHeader>
+            <tr>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('full_name')}
+              >
+                Name {getSortIcon('full_name')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('program_designation')}
+              >
+                Designation {getSortIcon('program_designation')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('email')}
+              >
+                Email ID {getSortIcon('email')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('phone')}
+              >
+                Contact No. {getSortIcon('phone')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('user_role')}
+              >
+                Role {getSortIcon('user_role')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('is_active')}
+              >
+                Status {getSortIcon('is_active')}
+              </TableHead>
+              <TableHead>Action</TableHead>
+            </tr>
+          </TableHeader>
+          <TableBody>
+            {filteredUsers.length === 0 ? (
+              <tr>
+                <TableCell colSpan={7} className="py-12 text-center text-gray-500 dark:text-slate-400">
+                  No users match your search criteria
+                </TableCell>
+              </tr>
+            ) : (
+              filteredUsers.map((user) => (
+                <TableRow
+                  key={user.id}
+                  onClick={() => handleViewUserDetails(user)}
+                  className="cursor-pointer"
+                >
+                  <TableCell>
+                    <div className="flex items-center">
+                      <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-950/80 flex items-center justify-center mr-3 shrink-0">
+                        <span className="text-blue-700 dark:text-blue-300 font-semibold text-sm">
+                          {user.full_name?.charAt(0).toUpperCase()}
+                        </span>
+                      </div>
+                      <p className="font-semibold text-gray-900 dark:text-slate-100">{user.full_name}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {user.program_designation || '-'}
+                  </TableCell>
+                  <TableCell>
+                    {user.email || '-'}
+                  </TableCell>
+                  <TableCell>
+                    {user.phone || '-'}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge
+                      status={user.user_role}
+                      variant={user.user_role === 'admin' ? 'purple' : 'blue'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge
+                      status={user.is_active ? 'Active' : 'Inactive'}
+                      variant={user.is_active ? 'emerald' : 'red'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewUserDetails(user, false);
+                        }}
+                        className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition"
+                        title="View details"
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleViewUserDetails(user, true);
+                        }}
+                        className="p-1.5 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 rounded-lg transition"
+                        title="Edit user details"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUser(user);
+                          setShowPermissionsModal(true);
+                        }}
+                        className="p-1.5 text-gray-600 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition"
+                        title="Edit permissions"
+                      >
+                        <Shield className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUser(user);
+                          setShowResetPasswordModal(true);
+                        }}
+                        className="p-1.5 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-950/50 rounded-lg transition"
+                        title="Reset password"
+                      >
+                        <Key className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedUser(user);
+                          setShowDeleteModal(true);
+                        }}
+                        className="p-1.5 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 rounded-lg transition"
+                        title="Delete user"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
       <AddUserModal
         isOpen={showAddUserModal}
@@ -822,7 +824,7 @@ export default function AdminUsersPage() {
                   setSelectedUser(null);
                 }}
                 disabled={resetPasswordLoading}
-                className="flex-1 px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition disabled:opacity-50"
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition disabled:opacity-50"
               >
                 Cancel
               </button>

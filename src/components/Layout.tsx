@@ -2,7 +2,11 @@ import { ReactNode, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth, PermissionName } from '../contexts/AuthContext';
 import NotificationBell from './NotificationBell';
+import ThemeToggle from './ThemeToggle';
 import SkillReminderModal from './SkillReminderModal';
+import DailyTodoFloatingButton from './DailyTodo/DailyTodoFloatingButton';
+import AiConnectorModal from './AiConnectorModal';
+import { BrandLogo } from './ui';
 import {
   FlaskConical,
   LayoutDashboard,
@@ -19,6 +23,9 @@ import {
   Warehouse,
   ClipboardList,
   FolderOpen,
+  FolderKanban,
+  Briefcase,
+  Bot,
 } from 'lucide-react';
 
 interface LayoutProps {
@@ -30,6 +37,7 @@ export default function Layout({ children }: LayoutProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [aiConnectorOpen, setAiConnectorOpen] = useState(false);
 
   const handleSignOut = async () => {
     await signOut();
@@ -43,6 +51,8 @@ export default function Layout({ children }: LayoutProps) {
     { icon: Users, label: 'Manage Users', path: '/admin/users', permissions: ['manage_users', 'manage_roles'] as const },
     { icon: ClipboardList, label: 'Work Overview', path: '/admin/work-overview', permissions: ['manage_work_cycles'] as const, adminOnly: true },
     { icon: ClipboardList, label: 'Work Overview', path: '/work-overview', permissions: ['view_work', 'create_work', 'edit_work'] as const, hideIfAdmin: true },
+    { icon: FolderKanban, label: 'Project Tracker', path: '/projects', permissions: ['view_projects', 'create_projects', 'edit_projects'] as const },
+    { icon: Briefcase, label: 'My Projects', path: '/my-projects', permissions: [] },
     { icon: Warehouse, label: 'Facilities', path: '/facilities', permissions: ['view_facilities', 'create_facilities', 'edit_facilities', 'delete_facilities'] as const },
     { icon: Package, label: 'Inventory', path: '/inventory', permissions: ['view_inventory', 'create_inventory', 'edit_inventory', 'delete_inventory'] as const },
     { icon: ShoppingCart, label: 'Procurement', path: '/admin/procurement', permissions: ['view_procurement', 'manage_procurement', 'approve_procurement'] as const },
@@ -55,8 +65,8 @@ export default function Layout({ children }: LayoutProps) {
     { icon: Settings, label: 'Settings', path: '/admin/settings', permissions: ['manage_settings'] as const },
   ];
 
-  const menuItems = allMenuItems.filter(item => {
-    const isAdmin = profile?.user_role === 'admin';
+  const menuItems = allMenuItems.filter((item) => {
+    const isAdmin = profile?.user_role === 'admin' || profile?.user_role === 'super_admin';
 
     // Admin-only routes: only show to admin-role users
     if ((item as any).adminOnly && !isAdmin) return false;
@@ -72,42 +82,61 @@ export default function Layout({ children }: LayoutProps) {
       if (item.path === '/repository' && hasAnyPermission(['edit_repository_all'])) return false;
     }
 
+    if (isAdmin) return true;
     if (item.permissions.length === 0) return true;
     return hasAnyPermission(item.permissions as PermissionName[]);
   });
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="lg:hidden fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-30">
-        <div className="flex items-center justify-between px-4 py-2 sm:py-3">
-          <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-10 sm:h-12 w-auto object-contain" />
-          </div>
+    <div className="min-h-screen bg-gray-50 dark:bg-slate-950 text-gray-900 dark:text-slate-100 transition-colors duration-200">
+      {/* Mobile Top Header */}
+      <div className="lg:hidden fixed top-0 left-0 right-0 h-16 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 z-30 transition-colors">
+        <div className="h-full flex items-center justify-between px-4 sm:px-6">
+          <button
+            onClick={() => {
+              navigate('/dashboard');
+              setSidebarOpen(false);
+            }}
+            className="flex items-center focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg py-1"
+            aria-label="SC Lab Home"
+          >
+            <BrandLogo variant="mobile" />
+          </button>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <NotificationBell />
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 rounded-lg hover:bg-gray-100 transition"
+              className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 text-gray-700 dark:text-slate-300 transition"
               aria-label="Toggle navigation menu"
             >
-              {sidebarOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
+              {sidebarOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
             </button>
           </div>
         </div>
       </div>
 
+      {/* Sidebar Aside */}
       <aside
-        className={`fixed top-0 left-0 h-full w-64 bg-white border-r border-gray-200 z-40 transition-transform duration-300 ${
+        className={`fixed top-0 left-0 h-full w-64 bg-white dark:bg-slate-900 border-r border-gray-200 dark:border-slate-800 z-40 transition-transform duration-300 flex flex-col ${
           sidebarOpen ? 'translate-x-0' : '-translate-x-full'
         } lg:translate-x-0`}
       >
-        <div className="p-4 sm:p-6 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <img src="/logo.png" alt="SC Lab Logo" className="h-14 sm:h-16 w-auto object-contain" />
-          </div>
+        {/* Dedicated Sidebar Branding Area */}
+        <div className="h-[70px] min-h-[70px] max-h-[70px] box-border w-full px-4 flex items-center justify-center border-b border-gray-200 dark:border-slate-800 shrink-0">
+          <button
+            onClick={() => {
+              navigate('/dashboard');
+              setSidebarOpen(false);
+            }}
+            className="focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg p-1 transition flex items-center justify-center max-h-[52px]"
+            aria-label="SC Lab Home"
+          >
+            <BrandLogo variant="sidebar" />
+          </button>
         </div>
 
-        <nav className="p-4 space-y-1">
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto min-h-0">
           {menuItems.map((item) => {
             const Icon = item.icon;
             const isActive = location.pathname === item.path;
@@ -118,34 +147,47 @@ export default function Layout({ children }: LayoutProps) {
                   navigate(item.path);
                   setSidebarOpen(false);
                 }}
-                className={`w-full flex items-center space-x-3 px-4 py-3 rounded-lg transition ${
+                className={`w-full h-10 flex items-center space-x-3 px-3.5 rounded-lg text-sm transition-all duration-150 ${
                   isActive
-                    ? 'bg-blue-50 text-blue-700 font-medium'
-                    : 'text-gray-700 hover:bg-gray-100'
+                    ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 font-semibold'
+                    : 'text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800/80 font-medium'
                 }`}
               >
-                <Icon className="w-5 h-5" />
-                <span>{item.label}</span>
+                <Icon className="w-[18px] h-[18px] shrink-0" />
+                <span className="truncate">{item.label}</span>
               </button>
             );
           })}
+          <button
+            onClick={() => {
+              setAiConnectorOpen(true);
+              setSidebarOpen(false);
+            }}
+            className="w-full h-10 flex items-center space-x-3 px-3.5 rounded-lg text-sm transition-all duration-150 text-gray-700 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800/80 font-medium"
+          >
+            <Bot className="w-[18px] h-[18px] shrink-0" />
+            <span className="truncate">AI Connector</span>
+          </button>
         </nav>
 
-        <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-200 bg-white">
-          <div className="flex items-center space-x-3 mb-3 px-2">
-            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
-              <span className="text-blue-700 font-medium">
+        {/* User Card & Sign Out at bottom */}
+        <div className="p-4 border-t border-gray-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
+          <div className="flex items-center space-x-3 mb-3 px-1">
+            <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-950/80 flex items-center justify-center shrink-0">
+              <span className="text-blue-700 dark:text-blue-300 font-semibold text-sm">
                 {profile?.full_name?.charAt(0).toUpperCase()}
               </span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-gray-900 truncate">{profile?.full_name}</p>
-              <p className="text-xs text-gray-500 capitalize">{profile?.user_role}</p>
+              <p className="text-sm font-semibold text-gray-900 dark:text-slate-100 truncate">
+                {profile?.full_name}
+              </p>
+              <p className="text-xs text-gray-500 dark:text-slate-400 capitalize truncate">{profile?.user_role}</p>
             </div>
           </div>
           <button
             onClick={handleSignOut}
-            className="w-full flex items-center justify-center space-x-2 px-4 py-2 text-red-600 hover:bg-red-50 rounded-lg transition"
+            className="w-full h-9 flex items-center justify-center space-x-2 px-3 text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 rounded-lg transition"
           >
             <LogOut className="w-4 h-4" />
             <span>Sign Out</span>
@@ -155,19 +197,23 @@ export default function Layout({ children }: LayoutProps) {
 
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-30 lg:hidden"
+          className="fixed inset-0 bg-black/50 z-30 lg:hidden"
           onClick={() => setSidebarOpen(false)}
         />
       )}
 
+      {/* Main Container */}
       <div className="lg:ml-64">
-        <header className="hidden lg:flex items-center justify-end bg-white border-b border-gray-200 px-6 py-4 sticky top-0 z-20">
+        <header className="hidden lg:flex items-center justify-end h-[70px] min-h-[70px] max-h-[70px] box-border bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 px-6 sm:px-8 sticky top-0 z-20 gap-3 transition-colors">
+          <ThemeToggle />
           <NotificationBell />
         </header>
-        <main className="pt-16 sm:pt-20 lg:pt-0 p-4 sm:p-6">{children}</main>
+        <main className="pt-20 lg:pt-8 p-4 sm:p-6 lg:p-8 max-w-7xl mx-auto pb-16">{children}</main>
       </div>
 
       <SkillReminderModal />
+      {aiConnectorOpen && <AiConnectorModal onClose={() => setAiConnectorOpen(false)} />}
+      <DailyTodoFloatingButton />
     </div>
   );
 }

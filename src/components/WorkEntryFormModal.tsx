@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
-import { X, Plus, Trash2, User, UserCheck } from 'lucide-react';
+import { X, Plus, Trash2, User, UserCheck, Flame } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../contexts/AuthContext';
+import { IssueType, WorkPriority } from '../types/work';
+import { ISSUE_TYPE_CONFIG } from './WorkIssueBadge';
 
 interface WorkEntryFormModalProps {
   isOpen: boolean;
@@ -40,7 +42,8 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
     description: '',
     start_date: '',
     end_date: '',
-    priority: 'medium' as 'low' | 'medium' | 'high',
+    issue_type: 'task' as IssueType,
+    priority: 'medium' as WorkPriority,
     initial_status: 'not_started' as 'not_started' | 'in_progress' | 'delayed' | 'completed',
     initial_percentage: 0,
   });
@@ -128,6 +131,34 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
         m => m.milestone_description && m.target_date && m.expected_outcome
       );
 
+      if (formData.end_date) {
+        const pEndDate = formData.end_date.slice(0, 10);
+        for (const m of validMilestones) {
+          const mDate = m.target_date ? m.target_date.slice(0, 10) : '';
+          if (mDate && mDate > pEndDate) {
+            setError(
+              `Milestone "${m.milestone_description || 'Milestone'}" target date (${mDate}) cannot be beyond the project target end date (${pEndDate}).`
+            );
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
+      if (formData.start_date) {
+        const pStartDate = formData.start_date.slice(0, 10);
+        for (const m of validMilestones) {
+          const mDate = m.target_date ? m.target_date.slice(0, 10) : '';
+          if (mDate && mDate < pStartDate) {
+            setError(
+              `Milestone "${m.milestone_description || 'Milestone'}" target date (${mDate}) cannot be before the project start date (${pStartDate}).`
+            );
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
       if (assignmentMode === 'assigned' && !assignedToUserId) {
         setError('Please select a team member to assign this work to.');
         setLoading(false);
@@ -138,20 +169,39 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
         ? (profile?.full_name || 'Supervisor')
         : (showCustomSupervisor ? formData.custom_assigned_by : formData.assigned_by);
 
-      if (!assignedByValue) {
+      if (!assignedByValue?.trim()) {
         setError('Please select or enter who this work is assigned by.');
         setLoading(false);
         return;
       }
 
+      if (!formData.project_name?.trim()) {
+        setError('Please enter a project name.');
+        setLoading(false);
+        return;
+      }
+
+      if (!formData.work_title?.trim()) {
+        setError('Please enter a work title.');
+        setLoading(false);
+        return;
+      }
+
+      const supervisorUser = users.find(u => u.full_name === formData.assigned_by);
+      const selectedSupervisorId = assignmentMode === 'assigned'
+        ? user?.id
+        : (showCustomSupervisor ? null : (supervisorUser?.id || null));
+
       const { error: workError } = await api.post('/api/work', {
         user_id: assignmentMode === 'assigned' ? assignedToUserId : user?.id,
-        project_name: formData.project_name || null,
-        assigned_by: assignedByValue,
-        work_title: formData.work_title || null,
-        description: formData.description || null,
+        assigned_by_user_id: selectedSupervisorId,
+        project_name: formData.project_name.trim(),
+        assigned_by: assignedByValue.trim(),
+        work_title: formData.work_title.trim(),
+        description: formData.description?.trim() || null,
         start_date: formData.start_date || null,
         end_date: formData.end_date || null,
+        issue_type: formData.issue_type,
         priority: formData.priority,
         initial_status: formData.initial_status,
         initial_percentage: formData.initial_percentage,
@@ -180,6 +230,7 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
       description: '',
       start_date: '',
       end_date: '',
+      issue_type: 'task',
       priority: 'medium',
       initial_status: 'not_started',
       initial_percentage: 0,
@@ -192,13 +243,13 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-lg max-w-4xl w-full max-h-[90vh] overflow-y-auto">
-        <div className="sticky top-0 bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-gray-900">Create New Work Entry</h2>
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-xs">
+      <div className="bg-white dark:bg-slate-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-gray-200 dark:border-slate-800 shadow-2xl transition-colors">
+        <div className="sticky top-0 bg-white dark:bg-slate-900 border-b border-gray-200 dark:border-slate-800 px-6 py-4 flex justify-between items-center z-10">
+          <h2 className="text-xl font-bold text-gray-900 dark:text-slate-100">Create New Work Entry</h2>
           <button
             onClick={onClose}
-            className="text-gray-400 hover:text-gray-600"
+            className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-slate-800 transition"
           >
             <X className="h-6 w-6" />
           </button>
@@ -206,19 +257,19 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
 
         <form onSubmit={handleSubmit} className="p-6 space-y-8">
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg">
+            <div className="bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg">
               {error}
             </div>
           )}
 
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 pb-2 border-b border-gray-200 dark:border-slate-800">
               Section A: Assigned Work Details
             </h3>
 
             {/* Assignment Mode Switcher */}
-            <div className="mb-6 bg-slate-50 border border-slate-200 p-3 rounded-xl">
-              <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">
+            <div className="mb-6 bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700 p-3 rounded-xl transition-colors">
+              <label className="block text-xs font-bold uppercase tracking-wider text-gray-600 dark:text-slate-400 mb-2">
                 Work Entry Type
               </label>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -227,8 +278,8 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
                   onClick={() => setAssignmentMode('self')}
                   className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
                     assignmentMode === 'self'
-                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-700'
-                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500 font-semibold'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700'
                   }`}
                 >
                   <User className="w-4 h-4" />
@@ -239,8 +290,8 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
                   onClick={() => setAssignmentMode('assigned')}
                   className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-sm font-medium transition-all ${
                     assignmentMode === 'assigned'
-                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-700'
-                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                      ? 'bg-blue-600 text-white shadow-sm ring-1 ring-blue-500 font-semibold'
+                      : 'bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 border border-slate-300 dark:border-slate-700'
                   }`}
                 >
                   <UserCheck className="w-4 h-4" />
@@ -253,14 +304,14 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
               {assignmentMode === 'assigned' ? (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                       Assign To <span className="text-red-500">*</span>
                     </label>
                     <select
                       required
                       value={assignedToUserId}
                       onChange={(e) => setAssignedToUserId(e.target.value)}
-                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                     >
                       <option value="">Select Member</option>
                       {assignableUsers.map((u) => {
@@ -275,50 +326,52 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                       Assigned By
                     </label>
-                    <div className="flex items-center px-3 py-2 h-[42px] bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
-                      <span className="font-semibold text-blue-900">{profile?.full_name || 'You'}</span>
+                    <div className="flex items-center px-3 py-2 h-[42px] bg-gray-50 dark:bg-slate-800 border border-gray-200 dark:border-slate-700 rounded-lg text-sm text-gray-700 dark:text-slate-200">
+                      <span className="font-semibold text-blue-600 dark:text-blue-400">{profile?.full_name || 'You'}</span>
                     </div>
                   </div>
 
                   <div className="md:col-span-2">
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Project Name
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                      Project Name <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
+                      required
                       value={formData.project_name}
                       onChange={(e) => setFormData({ ...formData, project_name: e.target.value })}
                       placeholder="e.g. Smart Materials Laboratory"
-                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm placeholder-gray-400 dark:placeholder-slate-500"
                     />
                   </div>
                 </>
               ) : (
                 <>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Project Name
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                      Project Name <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="text"
+                      required
                       value={formData.project_name}
                       onChange={(e) => setFormData({ ...formData, project_name: e.target.value })}
                       placeholder="e.g. Smart Materials Laboratory"
-                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm placeholder-gray-400 dark:placeholder-slate-500"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                       Assigned By (Supervisor Name) <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={showCustomSupervisor ? 'others' : (users.find(u => u.full_name === formData.assigned_by)?.id || '')}
                       onChange={(e) => handleAssignedByChange(e.target.value)}
-                      className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                      className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                     >
                       <option value="">Select Supervisor</option>
                       {users.map((user) => (
@@ -331,10 +384,11 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
                     {showCustomSupervisor && (
                       <input
                         type="text"
+                        required
                         value={formData.custom_assigned_by}
                         onChange={(e) => setFormData({ ...formData, custom_assigned_by: e.target.value })}
                         placeholder="Enter custom supervisor name"
-                        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mt-2 text-sm"
+                        className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent mt-2 text-sm"
                       />
                     )}
                   </div>
@@ -342,85 +396,119 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
               )}
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Work Title
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                  Work Title <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
+                  required
                   value={formData.work_title}
                   onChange={(e) => setFormData({ ...formData, work_title: e.target.value })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="e.g. Synthesize novel perovskite crystal thin films"
+                  className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm placeholder-gray-400 dark:placeholder-slate-500"
                 />
               </div>
 
               <div className="md:col-span-2">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                   Description
                 </label>
                 <textarea
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={4}
-                  className="w-full px-3 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Provide scope, targets, and testing methodology..."
+                  className="w-full px-3 py-2 bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm placeholder-gray-400 dark:placeholder-slate-500"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                   Start Date
                 </label>
                 <input
                   type="date"
                   value={formData.start_date}
                   onChange={(e) => setFormData({ ...formData, start_date: e.target.value })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                   End Date
                 </label>
                 <input
                   type="date"
                   value={formData.end_date}
                   onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Priority
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                  Issue Type
+                </label>
+                <select
+                  value={formData.issue_type}
+                  onChange={(e) => setFormData({ ...formData, issue_type: e.target.value as any })}
+                  className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
+                >
+                  <option value="task">Task (Standard)</option>
+                  <option value="experiment">Experiment</option>
+                  <option value="milestone">Milestone / Goal</option>
+                  <option value="equipment_maintenance">Equipment Maintenance</option>
+                  <option value="bug_incident">Bug / Incident</option>
+                  <option value="procurement_task">Procurement Task</option>
+                </select>
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
+                  Priority Level
                 </label>
                 <select
                   value={formData.priority}
                   onChange={(e) => setFormData({ ...formData, priority: e.target.value as any })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className={`w-full px-3 py-2 h-[42px] border rounded-lg focus:ring-2 focus:border-transparent font-medium text-sm ${
+                    formData.priority === 'code_red'
+                      ? 'bg-red-50 dark:bg-red-950/50 border-red-400 dark:border-red-600 text-red-700 dark:text-red-300 focus:ring-red-500'
+                      : 'bg-white dark:bg-slate-900 border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 focus:ring-blue-500'
+                  }`}
                 >
-                  <option value="low">Low</option>
-                  <option value="medium">Medium</option>
-                  <option value="high">High</option>
+                  <option value="low">Low Priority</option>
+                  <option value="medium">Medium Priority</option>
+                  <option value="high">High Priority</option>
+                  <option value="code_red">🚨 CODE-RED (Critical Emergency / Highest Priority)</option>
                 </select>
+                {formData.priority === 'code_red' && (
+                  <div className="mt-2.5 p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-300 text-xs flex items-start gap-2">
+                    <Flame className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5 animate-bounce" />
+                    <div>
+                      <strong>Critical Emergency Activation:</strong> Code-Red priority will trigger immediate notifications to all Lab Administrators. Dependent milestones will be flagged to track clashing schedules and delays.
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 pb-2 border-b border-gray-200 dark:border-slate-800">
               Section B: Milestone Planner
             </h3>
 
             <div className="space-y-4">
               {milestones.map((milestone, index) => (
-                <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <div key={index} className="bg-gray-50 dark:bg-slate-800/60 p-4 rounded-xl border border-gray-200 dark:border-slate-700">
                   <div className="flex justify-between items-center mb-3">
-                    <h4 className="font-medium text-gray-900">Milestone {index + 1}</h4>
+                    <h4 className="font-medium text-gray-900 dark:text-slate-100">Milestone {index + 1}</h4>
                     {milestones.length > 1 && (
                       <button
                         type="button"
                         onClick={() => handleRemoveMilestone(index)}
-                        className="text-red-600 hover:text-red-700"
+                        className="text-red-600 dark:text-red-400 hover:text-red-700 p-1 rounded"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -429,38 +517,42 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                     <div className="md:col-span-2">
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                         Milestone Description
                       </label>
                       <input
                         type="text"
                         value={milestone.milestone_description}
                         onChange={(e) => handleMilestoneChange(index, 'milestone_description', e.target.value)}
-                        className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="e.g. Calibrate optical spectrometer"
+                        className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm placeholder-gray-400 dark:placeholder-slate-500"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                         Target Date
                       </label>
                       <input
                         type="date"
                         value={milestone.target_date}
+                        max={formData.end_date ? formData.end_date.slice(0, 10) : undefined}
+                        min={formData.start_date ? formData.start_date.slice(0, 10) : undefined}
                         onChange={(e) => handleMilestoneChange(index, 'target_date', e.target.value)}
-                        className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                      <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-1">
                         Expected Outcome
                       </label>
                       <input
                         type="text"
                         value={milestone.expected_outcome}
                         onChange={(e) => handleMilestoneChange(index, 'expected_outcome', e.target.value)}
-                        className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                        placeholder="e.g. Baseline spectral readings documented"
+                        className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm placeholder-gray-400 dark:placeholder-slate-500"
                       />
                     </div>
                   </div>
@@ -470,7 +562,7 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
               <button
                 type="button"
                 onClick={handleAddMilestone}
-                className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium text-sm"
+                className="flex items-center gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium text-sm py-1"
               >
                 <Plus className="h-4 w-4" />
                 Add Another Milestone
@@ -479,19 +571,19 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
           </div>
 
           <div>
-            <h3 className="text-lg font-semibold text-gray-900 mb-4 pb-2 border-b border-gray-200">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100 mb-4 pb-2 border-b border-gray-200 dark:border-slate-800">
               Section C: Initial Status
             </h3>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                   Initial Status
                 </label>
                 <select
                   value={formData.initial_status}
                   onChange={(e) => setFormData({ ...formData, initial_status: e.target.value as any })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 >
                   <option value="not_started">Not Started</option>
                   <option value="in_progress">In Progress</option>
@@ -501,7 +593,7 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-gray-700 dark:text-slate-300 mb-2">
                   Initial Completion Percentage
                 </label>
                 <input
@@ -510,24 +602,24 @@ export default function WorkEntryFormModal({ isOpen, onClose, onSuccess }: WorkE
                   max="100"
                   value={formData.initial_percentage}
                   onChange={(e) => setFormData({ ...formData, initial_percentage: parseInt(e.target.value) || 0 })}
-                  className="w-full px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 h-[42px] bg-white dark:bg-slate-900 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
                 />
               </div>
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200">
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-slate-800">
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-300 dark:border-slate-700 text-gray-700 dark:text-slate-300 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-800 transition text-sm font-medium"
               disabled={loading}
             >
               Cancel
             </button>
             <button
               type="submit"
-              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-300"
+              className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition disabled:bg-blue-300 text-sm font-medium shadow-sm"
               disabled={loading}
             >
               {loading ? 'Creating...' : 'Create Work Entry'}

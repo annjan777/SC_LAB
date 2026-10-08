@@ -2,6 +2,21 @@ import { useEffect, useState, FormEvent } from 'react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { ShoppingCart, Check, X, Package, Truck, FileText, AlertCircle, Eye, ExternalLink, Boxes, Hash, Clock, Calendar, IndianRupee, User, Plus, Filter, Search } from 'lucide-react';
+import {
+  PageHeader,
+  Button,
+  Select,
+  TableContainer,
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  StatusBadge,
+  EmptyState,
+} from '../../components/ui';
+import ProcurementApproveModal from '../../components/ProcurementApproveModal';
 
 interface PurchaseRequest {
   id: string;
@@ -49,6 +64,7 @@ export default function AdminProcurementPage() {
   const [requests, setRequests] = useState<PurchaseRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedRequest, setSelectedRequest] = useState<PurchaseRequest | null>(null);
+  const [approvingRequest, setApprovingRequest] = useState<PurchaseRequest | null>(null);
   const [rejectionReason, setRejectionReason] = useState('');
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [showProcurementModal, setShowProcurementModal] = useState(false);
@@ -153,20 +169,6 @@ export default function AdminProcurementPage() {
       setError(err.message);
     } finally {
       setSubmitting(false);
-    }
-  };
-
-  const approveRequest = async (requestId: string) => {
-    setError('');
-    setSuccess('');
-
-    const { error: updateError } = await api.put('/api/admin/purchase-requests/' + requestId + '/approve', {});
-
-    if (!updateError) {
-      setSuccess('Request approved successfully');
-      fetchRequests();
-    } else {
-      setError(typeof updateError === 'string' ? updateError : updateError.message);
     }
   };
 
@@ -315,24 +317,23 @@ export default function AdminProcurementPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Procurement Management</h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">Review and manage purchase requests</p>
-        </div>
-        <button
-          onClick={() => {
-            setShowCreateForm(!showCreateForm);
-            setError('');
-            setSuccess('');
-          }}
-          className="px-4 sm:px-6 py-2.5 sm:py-3 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center justify-center space-x-2 transition font-medium shadow-sm w-full sm:w-auto"
-        >
-          <Plus className="w-5 h-5" />
-          <span>New Purchase Request</span>
-        </button>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Procurement Management"
+        action={
+          <Button
+            variant="primary"
+            onClick={() => {
+              setShowCreateForm(!showCreateForm);
+              setError('');
+              setSuccess('');
+            }}
+            leftIcon={<Plus className="w-4 h-4" />}
+          >
+            New Purchase Request
+          </Button>
+        }
+      />
 
       {error && (
         <div className="mb-4 bg-red-50 border border-red-200 rounded-lg p-4 flex items-start">
@@ -353,10 +354,10 @@ export default function AdminProcurementPage() {
           <form onSubmit={handleCreateRequest}>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-1" className="block text-sm font-medium text-gray-700 mb-1">
                   Product Name <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="prc-field-1"
                   type="text"
                   required
                   value={formData.item_name}
@@ -367,10 +368,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-2" className="block text-sm font-medium text-gray-700 mb-1">
                   Category <span className="text-red-500">*</span>
                 </label>
-                <select
+                <select id="prc-field-2"
                   value={formData.category}
                   onChange={(e) => setFormData({ ...formData, category: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -387,10 +388,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-3" className="block text-sm font-medium text-gray-700 mb-1">
                   Quantity <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="prc-field-3"
                   type="number"
                   required
                   min="1"
@@ -401,10 +402,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-4" className="block text-sm font-medium text-gray-700 mb-1">
                   Estimated Cost (₹) <span className="text-red-500">*</span>
                 </label>
-                <input
+                <input id="prc-field-4"
                   type="number"
                   required
                   step="0.01"
@@ -417,8 +418,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Vendor Name</label>
-                <input
+                <label htmlFor="prc-field-5" className="block text-sm font-medium text-gray-700 mb-1">Vendor Name</label>
+                <input id="prc-field-5"
                   type="text"
                   value={formData.vendor_name}
                   onChange={(e) => setFormData({ ...formData, vendor_name: e.target.value })}
@@ -428,8 +429,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Link</label>
-                <input
+                <label htmlFor="prc-field-6" className="block text-sm font-medium text-gray-700 mb-1">Link</label>
+                <input id="prc-field-6"
                   type="url"
                   value={formData.link}
                   onChange={(e) => setFormData({ ...formData, link: e.target.value })}
@@ -439,8 +440,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Manufacturer Part No</label>
-                <input
+                <label htmlFor="prc-field-7" className="block text-sm font-medium text-gray-700 mb-1">Manufacturer Part No</label>
+                <input id="prc-field-7"
                   type="text"
                   value={formData.manufacturer_part_no}
                   onChange={(e) => setFormData({ ...formData, manufacturer_part_no: e.target.value })}
@@ -450,8 +451,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Volume</label>
-                <input
+                <label htmlFor="prc-field-8" className="block text-sm font-medium text-gray-700 mb-1">Volume</label>
+                <input id="prc-field-8"
                   type="text"
                   value={formData.volume}
                   onChange={(e) => setFormData({ ...formData, volume: e.target.value })}
@@ -461,8 +462,8 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Duration of Consumption</label>
-                <input
+                <label htmlFor="prc-field-9" className="block text-sm font-medium text-gray-700 mb-1">Duration of Consumption</label>
+                <input id="prc-field-9"
                   type="text"
                   value={formData.duration_of_consumption}
                   onChange={(e) => setFormData({ ...formData, duration_of_consumption: e.target.value })}
@@ -472,9 +473,12 @@ export default function AdminProcurementPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Project Code</label>
-                <input
+                <label htmlFor="prc-field-10" className="block text-sm font-medium text-gray-700 mb-1">
+                  Project Code {hasPermission('approve_procurement') && <span className="text-red-500">*</span>}
+                </label>
+                <input id="prc-field-10"
                   type="text"
+                  required={hasPermission('approve_procurement')}
                   value={formData.project_code}
                   onChange={(e) => setFormData({ ...formData, project_code: e.target.value })}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -483,10 +487,10 @@ export default function AdminProcurementPage() {
               </div>
 
               <div className="md:col-span-3">
-                <label className="block text-sm font-medium text-gray-700 mb-1">
+                <label htmlFor="prc-field-11" className="block text-sm font-medium text-gray-700 mb-1">
                   Purpose <span className="text-red-500">*</span>
                 </label>
-                <textarea
+                <textarea id="prc-field-11"
                   required
                   rows={3}
                   value={formData.purpose}
@@ -523,7 +527,7 @@ export default function AdminProcurementPage() {
                     project_code: '',
                   });
                 }}
-                className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium transition"
+                className="px-6 py-2 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
               >
                 Cancel
               </button>
@@ -547,10 +551,10 @@ export default function AdminProcurementPage() {
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-8">
         <div className="flex flex-col md:flex-row gap-4 items-end">
           <div className="flex-1 w-full relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+            <label htmlFor="prc-field-12" className="block text-sm font-medium text-gray-700 mb-1">Search</label>
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
-              <input
+              <input id="prc-field-12"
                 type="text"
                 value={filters.search}
                 onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value }))}
@@ -562,8 +566,8 @@ export default function AdminProcurementPage() {
           
           {hasPermission('approve_procurement') && (
             <div className="flex-1 w-full relative">
-              <label className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
-              <select
+              <label htmlFor="prc-field-13" className="block text-sm font-medium text-gray-700 mb-1">Requested By</label>
+              <select id="prc-field-13"
                 value={filters.user}
                 onChange={(e) => setFilters(prev => ({ ...prev, user: e.target.value }))}
                 className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -577,8 +581,8 @@ export default function AdminProcurementPage() {
           )}
 
           <div className="flex-1 w-full relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Requested Date</label>
-            <input
+            <label htmlFor="prc-field-14" className="block text-sm font-medium text-gray-700 mb-1">Requested Date</label>
+            <input id="prc-field-14"
               type="date"
               value={filters.date}
               onChange={(e) => setFilters(prev => ({ ...prev, date: e.target.value }))}
@@ -587,8 +591,8 @@ export default function AdminProcurementPage() {
           </div>
 
           <div className="flex-1 w-full relative">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
-            <select
+            <label htmlFor="prc-field-15" className="block text-sm font-medium text-gray-700 mb-1">Sort By</label>
+            <select id="prc-field-15"
               value={filters.sortBy}
               onChange={(e) => setFilters(prev => ({ ...prev, sortBy: e.target.value }))}
               className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -660,22 +664,22 @@ export default function AdminProcurementPage() {
               onClick={() => handleCardClick(request)}
               className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition cursor-pointer hover:border-blue-300"
             >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex items-center space-x-3">
-                  <div className="bg-blue-100 p-3 rounded-lg">
+              <div className="flex items-start justify-between gap-3 mb-4">
+                <div className="flex items-center space-x-3 min-w-0">
+                  <div className="bg-blue-100 p-3 rounded-lg shrink-0">
                     <Package className="w-6 h-6 text-blue-600" />
                   </div>
-                  <div>
-                    <h3 className="text-lg font-semibold text-gray-900">{request.item_name}</h3>
-                    <p className="text-sm text-gray-500">
-                      Requested by {request.user_profiles.full_name}
-                      {request.user_profiles.email ? ` (${request.user_profiles.email})` : ''}
-                      {request.user_profiles.department ? ` - ${request.user_profiles.department}` : ''}
+                  <div className="min-w-0">
+                    <h3 className="text-lg font-semibold text-gray-900 break-words">{request.item_name}</h3>
+                    <p className="text-sm text-gray-500 break-words">
+                      Requested by {request.user_profiles?.full_name}
+                      {request.user_profiles?.email ? ` (${request.user_profiles?.email})` : ''}
+                      {request.user_profiles?.department ? ` - ${request.user_profiles?.department}` : ''}
                     </p>
                   </div>
                 </div>
                 <span
-                  className={`px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
+                  className={`shrink-0 px-3 py-1 rounded-full text-sm font-medium ${getStatusColor(
                     request.status
                   )}`}
                 >
@@ -724,7 +728,9 @@ export default function AdminProcurementPage() {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        approveRequest(request.id);
+                        setError('');
+                        setSuccess('');
+                        setApprovingRequest(request);
                       }}
                       className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center space-x-2 transition"
                     >
@@ -795,6 +801,18 @@ export default function AdminProcurementPage() {
         })()}
       </div>
 
+      {approvingRequest && (
+        <ProcurementApproveModal
+          request={approvingRequest}
+          onClose={() => setApprovingRequest(null)}
+          onApproved={(message) => {
+            setApprovingRequest(null);
+            setSuccess(message);
+            fetchRequests();
+          }}
+        />
+      )}
+
       {showRejectModal && selectedRequest && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-lg max-w-md w-full p-6">
@@ -820,7 +838,7 @@ export default function AdminProcurementPage() {
                   setSelectedRequest(null);
                   setRejectionReason('');
                 }}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 font-medium"
+                className="flex-1 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
               >
                 Cancel
               </button>
@@ -839,10 +857,10 @@ export default function AdminProcurementPage() {
             <div className="p-6 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-16" className="block text-sm font-medium text-gray-700 mb-1">
                     Approved Cost (₹)
                   </label>
-                  <input
+                  <input id="prc-field-16"
                     type="number"
                     step="0.01"
                     value={procurementDetails.approved_cost || ''}
@@ -851,10 +869,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-17" className="block text-sm font-medium text-gray-700 mb-1">
                     PO Number
                   </label>
-                  <input
+                  <input id="prc-field-17"
                     type="text"
                     value={procurementDetails.po_number}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, po_number: e.target.value })}
@@ -862,10 +880,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-18" className="block text-sm font-medium text-gray-700 mb-1">
                     Vendor Contact
                   </label>
-                  <input
+                  <input id="prc-field-18"
                     type="text"
                     value={procurementDetails.vendor_contact}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, vendor_contact: e.target.value })}
@@ -873,10 +891,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-19" className="block text-sm font-medium text-gray-700 mb-1">
                     Order Date
                   </label>
-                  <input
+                  <input id="prc-field-19"
                     type="date"
                     value={procurementDetails.order_date}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, order_date: e.target.value })}
@@ -884,10 +902,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-20" className="block text-sm font-medium text-gray-700 mb-1">
                     Expected Delivery Date
                   </label>
-                  <input
+                  <input id="prc-field-20"
                     type="date"
                     value={procurementDetails.expected_delivery_date}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, expected_delivery_date: e.target.value })}
@@ -895,10 +913,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-21" className="block text-sm font-medium text-gray-700 mb-1">
                     Dispatch Date
                   </label>
-                  <input
+                  <input id="prc-field-21"
                     type="date"
                     value={procurementDetails.dispatch_date}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, dispatch_date: e.target.value })}
@@ -906,10 +924,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-22" className="block text-sm font-medium text-gray-700 mb-1">
                     Tracking ID
                   </label>
-                  <input
+                  <input id="prc-field-22"
                     type="text"
                     value={procurementDetails.tracking_id}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, tracking_id: e.target.value })}
@@ -917,10 +935,10 @@ export default function AdminProcurementPage() {
                   />
                 </div>
                 <div className="md:col-span-2">
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                  <label htmlFor="prc-field-23" className="block text-sm font-medium text-gray-700 mb-1">
                     Remarks
                   </label>
-                  <textarea
+                  <textarea id="prc-field-23"
                     rows={3}
                     value={procurementDetails.remarks}
                     onChange={(e) => setProcurementDetails({ ...procurementDetails, remarks: e.target.value })}
@@ -942,7 +960,7 @@ export default function AdminProcurementPage() {
                     setSelectedRequest(null);
                     resetProcurementDetails();
                   }}
-                  className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 font-medium"
+                  className="flex-1 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
                 >
                   Cancel
                 </button>
@@ -960,8 +978,8 @@ export default function AdminProcurementPage() {
               Update status for: <span className="font-semibold">{selectedRequest.item_name}</span>
             </p>
             <div className="mb-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">New Status</label>
-              <select
+              <label htmlFor="prc-field-24" className="block text-sm font-medium text-gray-700 mb-2">New Status</label>
+              <select id="prc-field-24"
                 value={newStatus}
                 onChange={(e) => setNewStatus(e.target.value)}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
@@ -986,7 +1004,7 @@ export default function AdminProcurementPage() {
                   setSelectedRequest(null);
                   setNewStatus('');
                 }}
-                className="flex-1 bg-gray-200 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-300 font-medium"
+                className="flex-1 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 py-2 px-4 rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 font-medium transition"
               >
                 Cancel
               </button>
@@ -1172,12 +1190,12 @@ export default function AdminProcurementPage() {
                 </div>
                 <div>
                   <p className="text-sm text-gray-500 mb-1">Requested By</p>
-                  <p className="text-gray-900 font-medium">{selectedRequest.user_profiles.full_name}</p>
-                  {selectedRequest.user_profiles.email && (
-                    <p className="text-sm text-gray-600 mt-1">Email: {selectedRequest.user_profiles.email}</p>
+                  <p className="text-gray-900 font-medium">{selectedRequest.user_profiles?.full_name}</p>
+                  {selectedRequest.user_profiles?.email && (
+                    <p className="text-sm text-gray-600 mt-1">Email: {selectedRequest.user_profiles?.email}</p>
                   )}
-                  {selectedRequest.user_profiles.department && (
-                    <p className="text-sm text-gray-600 mt-1">Department: {selectedRequest.user_profiles.department}</p>
+                  {selectedRequest.user_profiles?.department && (
+                    <p className="text-sm text-gray-600 mt-1">Department: {selectedRequest.user_profiles?.department}</p>
                   )}
                 </div>
               </div>

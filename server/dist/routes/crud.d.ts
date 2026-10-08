@@ -8,6 +8,7 @@ interface CrudOptions {
     updatePermission?: string;
     deletePermission?: string;
     defaultOrder?: string;
+    ownerWrite?: boolean;
 }
 export declare function createCrudRouter(opts: CrudOptions): import("express-serve-static-core").Router;
 export {};

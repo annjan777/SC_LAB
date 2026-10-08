@@ -6,13 +6,15 @@ import { generateToken, generatePasswordResetToken, authenticate, authenticateRe
 import { sendPasswordResetLinkEmail, sendTempPasswordEmail } from '../utils/email.js';
 import { validateBody } from '../middleware/validateRequest.js';
 import { loginSchema, changePasswordSchema, forgotPasswordSchema } from '../validators/authValidator.js';
-import { recordFailedLogin, resetFailedLogin } from '../middleware/progressiveRateLimiter.js';
+import { recordFailedLogin, resetFailedLogin, recordFailedLoginForAccount, getAccountBlockRemainingMs, resetAccountFailures, formatTime, } from '../middleware/progressiveRateLimiter.js';
 import { checkUserNeedsSkillReminder } from '../services/skillReminderService.js';
 function isValidPassword(password) {
     return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
 }
 const APP_URL = process.env.APP_URL || 'http://localhost:5173';
 const router = Router();
+/** Bootstrap super admin seeded by initAdmin (stored with user_role 'admin'). */
+const BOOTSTRAP_SUPER_ADMIN_ID = '00000000-0000-0000-0000-000000000001';
 async function ensureProfileCompletionAccurate(profile) {
     if (!profile)
         return profile;
@@ -41,21 +43,35 @@ async function ensureProfileCompletionAccurate(profile) {
 router.post('/login', validateBody(loginSchema), async (req, res) => {
     try {
         const { email, password } = req.body;
-        const userResult = await query('SELECT id, email, password_hash FROM users WHERE email = $1', [email]);
+        // Per-account lockout (in addition to the per-IP limiter) so rotating IPs cannot
+        // keep guessing one account's password.
+        const accountBlockMs = getAccountBlockRemainingMs(email);
+        if (accountBlockMs > 0) {
+            return res.status(429).json({
+                error: `Too many failed login attempts. Please try again in ${formatTime(accountBlockMs)}.`
+            });
+        }
+        const userResult = await query('SELECT id, email, password_hash FROM users WHERE LOWER(email) = LOWER($1)', [email]);
         if (userResult.rows.length === 0) {
-            recordFailedLogin(req.ip || req.socket.remoteAddress || 'unknown');
+            recordFailedLogin(req.ip || req.socket.remoteAddress || 'unknown', email);
+            recordFailedLoginForAccount(email);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         const user = userResult.rows[0];
         const valid = await bcrypt.compare(password, user.password_hash);
         if (!valid) {
-            recordFailedLogin(req.ip || req.socket.remoteAddress || 'unknown');
+            recordFailedLogin(req.ip || req.socket.remoteAddress || 'unknown', email);
+            recordFailedLoginForAccount(email);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
         // Login successful, reset the rate limit tracker for this IP
         resetFailedLogin(req.ip || req.socket.remoteAddress || 'unknown');
+        resetAccountFailures(email);
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [user.id]);
         const profile = await ensureProfileCompletionAccurate(profileResult.rows[0] || null);
+        if (profile && profile.is_active === false) {
+            return res.status(403).json({ error: 'Account has been deactivated. Contact an administrator.' });
+        }
         if (profile?.require_password_change) {
             if (profile.temp_password_expires_at && new Date(profile.temp_password_expires_at) < new Date()) {
                 return res.status(403).json({ error: 'Temporary password expired. Please contact an administrator.' });
@@ -106,8 +122,12 @@ router.post('/change-password', authenticateResetToken, validateBody(changePassw
                 return res.status(401).json({ error: 'Incorrect current password' });
             }
         }
+        const currentHashRes = await query('SELECT password_hash FROM users WHERE id = $1', [req.user.id]);
+        if (currentHashRes.rows[0]?.password_hash && await bcrypt.compare(password, currentHashRes.rows[0].password_hash)) {
+            return res.status(400).json({ error: 'New password must be different from your current or temporary password' });
+        }
         const hash = await bcrypt.hash(password, 10);
-        await query('UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2', [hash, req.user.id]);
+        await query('UPDATE users SET password_hash = $1, reset_password_token = NULL, reset_password_expires = NULL, updated_at = now() WHERE id = $2', [hash, req.user.id]);
         await query('UPDATE user_profiles SET last_password_changed_at = now(), require_password_change = false WHERE id = $1', [req.user.id]);
         const userRow = await query('SELECT id, email FROM users WHERE id = $1', [req.user.id]);
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [req.user.id]);
@@ -145,6 +165,17 @@ router.get('/me', authenticate, async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
 });
+// POST /api/auth/logout — server-side sign-out: every session token issued before now is rejected.
+router.post('/logout', authenticate, async (req, res) => {
+    try {
+        await query('UPDATE user_profiles SET sessions_revoked_at = now() WHERE id = $1', [req.user.id]);
+        res.json({ message: 'Logged out' });
+    }
+    catch (err) {
+        console.error('Logout error:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 // GET /api/auth/verify-reset-token
 router.get('/verify-reset-token', authenticateResetToken, async (req, res) => {
     // If the middleware passes, the token is valid
@@ -156,23 +187,22 @@ router.get('/verify-reset-token', authenticateResetToken, async (req, res) => {
 router.post('/forgot-password', validateBody(forgotPasswordSchema), async (req, res) => {
     try {
         const { email } = req.body;
-        const userResult = await query('SELECT u.id, u.email, up.full_name FROM users u LEFT JOIN user_profiles up ON up.id = u.id WHERE u.email = $1', [email]);
+        const userResult = await query('SELECT u.id, u.email, up.full_name FROM users u LEFT JOIN user_profiles up ON up.id = u.id WHERE LOWER(u.email) = LOWER($1)', [email]);
         if (userResult.rows.length === 0) {
             return res.status(404).json({ error: 'No account found with that email address.' });
         }
         const user = userResult.rows[0];
-        const token = generatePasswordResetToken(user.id, user.email);
+        const token = crypto.randomBytes(32).toString('hex');
         const resetUrl = `${APP_URL}/reset-password?token=${token}`;
-        // Invalidate the old password so the user cannot log in with it anymore
-        const randomPassword = crypto.randomBytes(32).toString('hex');
-        const randomHash = await bcrypt.hash(randomPassword, 10);
-        await query('UPDATE users SET password_hash = $1 WHERE id = $2', [randomHash, user.id]);
+        // Store the reset token with a 1-hour expiration timestamp.
+        // CRITICAL SECURITY FIX: Do NOT touch password_hash! The existing password remains active
+        // until the user actually enters and confirms a new password via the reset link.
+        await query(`UPDATE users
+       SET reset_password_token = $1, reset_password_expires = now() + interval '1 hour', updated_at = now()
+       WHERE id = $2`, [token, user.id]);
         sendPasswordResetLinkEmail(user.email, user.full_name || 'there', resetUrl).then(sendResult => {
             if (!sendResult.success) {
-                console.log(`\n======================================================`);
-                console.log(`[DEV MODE PASSWORD RESET LINK FOR ${user.email}]:`);
-                console.log(`   ${resetUrl}`);
-                console.log(`======================================================\n`);
+                console.warn(`[AUTH] Failed to dispatch password reset email to ${user.email}`);
             }
         }).catch(err => console.error('Background email error:', err));
         res.json({ message: 'A password reset link has been sent to your email.' });
@@ -193,13 +223,15 @@ router.post('/admin-reset-password', authenticate, async (req, res) => {
         if (providedPassword && !isValidPassword(providedPassword)) {
             return res.status(400).json({ error: 'Password must be at least 8 characters long and contain uppercase, lowercase, and numbers' });
         }
-        // Only super_admin may reset a super_admin's password — prevents a lower-privileged
-        // admin from taking over a super_admin account via this endpoint.
-        if (req.user.user_role !== 'super_admin') {
-            const targetRole = await query('SELECT user_role FROM user_profiles WHERE id = $1', [userId]);
-            if (targetRole.rows[0]?.user_role === 'super_admin') {
-                return res.status(403).json({ error: 'Insufficient privileges to reset this user\'s password' });
-            }
+        // The bootstrap super admin and any super_admin can only reset their own password here —
+        // prevents another admin from taking over the top-level account via this endpoint.
+        if (typeof userId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)) {
+            return res.status(400).json({ error: 'Invalid userId' });
+        }
+        const targetRole = await query('SELECT user_role FROM user_profiles WHERE id = $1', [userId]);
+        const isProtectedTarget = userId === BOOTSTRAP_SUPER_ADMIN_ID || targetRole.rows[0]?.user_role === 'super_admin';
+        if (isProtectedTarget && req.user.id !== userId) {
+            return res.status(403).json({ error: 'Insufficient privileges to reset this user\'s password' });
         }
         const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
         const password = providedPassword || Array.from(crypto.randomBytes(12)).map(b => chars[b % chars.length]).join('');
@@ -215,15 +247,21 @@ router.post('/admin-reset-password', authenticate, async (req, res) => {
        WHERE id = $1`, [userId]);
         // Fetch user info for email
         const userInfo = await query('SELECT up.full_name, u.email FROM user_profiles up JOIN users u ON u.id = up.id WHERE up.id = $1', [userId]);
+        let emailSent = false;
         if (userInfo.rows.length > 0) {
             const { full_name, email } = userInfo.rows[0];
-            sendTempPasswordEmail(email, full_name, password).then(result => {
+            try {
+                const result = await sendTempPasswordEmail(email, full_name, password);
+                emailSent = result.success;
                 if (!result.success) {
-                    console.log(`[DEV MODE] Password for ${email} reset to: ${password}`);
+                    console.warn(`[AUTH] Failed to dispatch temporary password email to ${email}`);
                 }
-            }).catch(err => console.error('Background email error:', err));
+            }
+            catch (err) {
+                console.error('Temporary password email error:', err);
+            }
         }
-        res.json({ message: 'Password reset successfully', password, email_sent: true });
+        res.json({ message: 'Password reset successfully', password, email_sent: emailSent });
     }
     catch (err) {
         console.error('Admin reset password error:', err);

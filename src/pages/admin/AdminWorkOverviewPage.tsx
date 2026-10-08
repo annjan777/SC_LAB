@@ -1,6 +1,23 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, Users, Clock, TrendingUp, AlertCircle, CheckCircle2, Eye, X, ShoppingCart, ChevronDown, ChevronUp, ClipboardList, Plus, Edit2 } from 'lucide-react';
+import {
+  AlertTriangle,
+  Users,
+  Clock,
+  TrendingUp,
+  AlertCircle,
+  CheckCircle2,
+  Eye,
+  X,
+  ShoppingCart,
+  ChevronDown,
+  ChevronUp,
+  ClipboardList,
+  Plus,
+  Edit2,
+  GitPullRequest,
+  Flame,
+} from 'lucide-react';
 import { api } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import AdminWorkDetailModal from '../../components/AdminWorkDetailModal';
@@ -10,6 +27,19 @@ import WorkEntryDetailModal from '../../components/WorkEntryDetailModal';
 import ProgressUpdateModal from '../../components/ProgressUpdateModal';
 import ProblemReportModal from '../../components/ProblemReportModal';
 import DeleteConfirmationModal from '../../components/DeleteConfirmationModal';
+import {
+  CodeRedAlertBanner,
+  IssueKeyTag,
+  IssueTypeBadge,
+  WorkPriorityBadge,
+} from '../../components/WorkIssueBadge';
+import WorkFilterToolbar, {
+  WorkFilterState,
+  DEFAULT_WORK_FILTERS,
+} from '../../components/WorkFilterToolbar';
+import MilestoneChangeRequestReviewModal from '../../components/MilestoneChangeRequestReviewModal';
+import { MilestoneChangeRequest } from '../../types/work';
+import { PageHeader } from '../../components/ui';
 
 interface WorkCycle {
   id: string;
@@ -23,14 +53,18 @@ interface UserWorkData {
   user_name: string;
   department: string;
   work_id: string;
+  issue_key?: string;
+  issue_type?: any;
   project_name: string;
   work_title: string;
   assigned_by: string;
-  priority: string;
+  priority: any;
   admin_status: string;
   completion_percentage: number;
   latest_status: string;
   open_problems_count: number;
+  pending_milestone_requests_count?: number;
+  blocked_by_code_red_count?: number;
   last_updated: string;
   days_since_update: number;
 }
@@ -42,6 +76,8 @@ interface Statistics {
   delayedWorkCount: number;
   highImpactProblemsCount: number;
   openSupportRequests: Record<string, number>;
+  codeRedCount?: number;
+  pendingMilestoneRequestsCount?: number;
 }
 
 export default function AdminWorkOverviewPage() {
@@ -57,6 +93,11 @@ export default function AdminWorkOverviewPage() {
 
   const [activeCycle, setActiveCycle] = useState<WorkCycle | null>(null);
   const [workData, setWorkData] = useState<UserWorkData[]>([]);
+  const [pendingMilestoneRequests, setPendingMilestoneRequests] = useState<MilestoneChangeRequest[]>([]);
+  const [activeCodeRedWorks, setActiveCodeRedWorks] = useState<any[]>([]);
+  const [selectedChangeRequest, setSelectedChangeRequest] = useState<MilestoneChangeRequest | null>(null);
+  const [customFilters, setCustomFilters] = useState<WorkFilterState>(DEFAULT_WORK_FILTERS);
+
   const [myWorkSummary, setMyWorkSummary] = useState<{
     totalWorks: number;
     avgCompletion: number;
@@ -70,15 +111,10 @@ export default function AdminWorkOverviewPage() {
     delayedWorkCount: 0,
     highImpactProblemsCount: 0,
     openSupportRequests: { supervisor: 0, admin: 0, facility_spoc: 0, procurement: 0 },
+    codeRedCount: 0,
+    pendingMilestoneRequestsCount: 0,
   });
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({
-    project: '',
-    status: '',
-    priority: '',
-    search: '',
-    user: '',
-  });
   const [selectedWorkId, setSelectedWorkId] = useState<string | null>(null);
   const [showCreateWorkModal, setShowCreateWorkModal] = useState(false);
   const [activeCardFilter, setActiveCardFilter] = useState<string | null>(null);
@@ -98,24 +134,42 @@ export default function AdminWorkOverviewPage() {
   const [deleteLoading, setDeleteLoading] = useState(false);
 
   const hasEditPerm = hasPermission('edit_work') || profile?.user_role === 'admin' || profile?.user_role === 'super_admin';
-  const isWorkOwnerOrSupervisor = (work: UserWorkData) => work.user_id === user?.id || (work.assigned_by && work.assigned_by === profile?.full_name);
+  const isWorkOwnerOrSupervisor = (work: UserWorkData) =>
+    work.user_id === user?.id ||
+    Boolean((work as any).assigned_by_user_id && (work as any).assigned_by_user_id === user?.id) ||
+    Boolean(work.assigned_by && user?.email && work.assigned_by.trim().toLowerCase() === user.email.trim().toLowerCase());
   const canEditWork = (work: UserWorkData) => hasEditPerm || isWorkOwnerOrSupervisor(work);
 
   useEffect(() => {
     fetchData();
+    const params = new URLSearchParams(window.location.search);
+    const targetWorkId = params.get('workId');
+    if (targetWorkId) {
+      setSelectedWorkId(targetWorkId);
+    }
   }, []);
 
   const fetchData = async () => {
     try {
       setLoading(true);
 
-      // Get overview data from admin endpoint (no cycle filtering)
+      // Get overview data from admin endpoint
       const { data: overview } = await api.get('/api/admin/work/overview');
 
       if (overview) {
-        setWorkData(overview.workData || []);
+        const rawWorks = overview.workData || [];
+        setWorkData(rawWorks);
+        setExpandedUsers((prev) => {
+          const next = new Set(prev);
+          rawWorks.forEach((w: any) => {
+            if (w.user_id) next.add(w.user_id);
+          });
+          return next;
+        });
         setMyWorkSummary(overview.myWorkSummary || { totalWorks: 0, avgCompletion: 0, openProblems: 0 });
         setUsersWithoutWork(overview.usersWithoutWork || []);
+        setPendingMilestoneRequests(overview.pendingMilestoneRequests || []);
+        setActiveCodeRedWorks(overview.activeCodeRedWorks || []);
         setStatistics(overview.statistics || {
           totalUsers: 0,
           usersWithWork: 0,
@@ -123,6 +177,8 @@ export default function AdminWorkOverviewPage() {
           delayedWorkCount: 0,
           highImpactProblemsCount: 0,
           openSupportRequests: { supervisor: 0, admin: 0, facility_spoc: 0, procurement: 0 },
+          codeRedCount: 0,
+          pendingMilestoneRequestsCount: 0,
         });
       }
     } catch (error) {
@@ -134,44 +190,60 @@ export default function AdminWorkOverviewPage() {
 
   const filteredData = workData.filter(work => {
     if (activeCardFilter === 'usersWithWork') {
-      return true;
-    }
-    if (activeCardFilter === 'delayed') {
+      // no-op
+    } else if (activeCardFilter === 'delayed') {
       if (work.latest_status !== 'delayed') return false;
-    }
-    if (activeCardFilter === 'highImpactProblems') {
+    } else if (activeCardFilter === 'highImpactProblems') {
       if (work.open_problems_count === 0) return false;
     }
 
-    if (filters.project && !work.project_name.toLowerCase().includes(filters.project.toLowerCase())) {
+    if (customFilters.codeRedOnly && work.priority !== 'code_red') {
       return false;
     }
-    if (filters.status && work.latest_status !== filters.status) {
+
+    if (customFilters.delayedOnly && work.latest_status !== 'delayed' && (work.blocked_by_code_red_count ?? 0) === 0) {
       return false;
     }
-    if (filters.priority && work.priority !== filters.priority) {
+
+    if (customFilters.pendingApprovalOnly && (work.pending_milestone_requests_count ?? 0) === 0) {
       return false;
     }
-    if (filters.user && work.user_name !== filters.user) {
+
+    if (customFilters.issueType !== 'all' && (work.issue_type || 'task') !== customFilters.issueType) {
       return false;
     }
-    if (filters.search) {
-      const searchLower = filters.search.toLowerCase();
-      return (
-        work.user_name.toLowerCase().includes(searchLower) ||
-        work.work_title.toLowerCase().includes(searchLower) ||
-        work.project_name.toLowerCase().includes(searchLower)
-      );
+
+    if (customFilters.priority !== 'all' && work.priority !== customFilters.priority) {
+      return false;
     }
+
+    if (customFilters.status !== 'all') {
+      if (work.latest_status !== customFilters.status && work.admin_status !== customFilters.status) {
+        return false;
+      }
+    }
+
+    if (customFilters.search) {
+      const q = customFilters.search.toLowerCase();
+      const match =
+        (work.issue_key && work.issue_key.toLowerCase().includes(q)) ||
+        (work.work_title && work.work_title.toLowerCase().includes(q)) ||
+        (work.project_name && work.project_name.toLowerCase().includes(q)) ||
+        (work.user_name && work.user_name.toLowerCase().includes(q)) ||
+        (work.department && work.department.toLowerCase().includes(q));
+      if (!match) return false;
+    }
+
     return true;
   });
 
   const groupedByUser = filteredData.reduce((acc, work) => {
-    if (!acc[work.user_id]) {
-      acc[work.user_id] = {
-        userId: work.user_id,
-        userName: work.user_name,
-        department: work.department,
+    const uId = work.user_id || 'unassigned';
+    if (!acc[uId]) {
+      acc[uId] = {
+        userId: uId,
+        userName: work.user_name || 'Team Member',
+        department: work.department || '',
         works: [],
         hasDelayed: false,
         hasStaleUpdates: false,
@@ -179,10 +251,10 @@ export default function AdminWorkOverviewPage() {
         avgProgress: 0,
       };
     }
-    acc[work.user_id].works.push(work);
-    if (work.latest_status === 'delayed') acc[work.user_id].hasDelayed = true;
-    if (work.days_since_update >= 14) acc[work.user_id].hasStaleUpdates = true;
-    acc[work.user_id].problemsCount += work.open_problems_count;
+    acc[uId].works.push(work);
+    if (work.latest_status === 'delayed') acc[uId].hasDelayed = true;
+    if (work.days_since_update >= 14) acc[uId].hasStaleUpdates = true;
+    acc[uId].problemsCount += (work.open_problems_count || 0);
     return acc;
   }, {} as Record<string, {
     userId: string;
@@ -197,14 +269,14 @@ export default function AdminWorkOverviewPage() {
 
   const groupedUsers = Object.values(groupedByUser).map(user => ({
     ...user,
-    avgProgress: Math.round(user.works.reduce((sum, w) => sum + w.completion_percentage, 0) / user.works.length),
+    avgProgress: user.works.length > 0 ? Math.round(user.works.reduce((sum, w) => sum + (Number(w.completion_percentage) || 0), 0) / user.works.length) : 0,
   })).sort((a, b) => {
     if (a.hasDelayed && !b.hasDelayed) return -1;
     if (!a.hasDelayed && b.hasDelayed) return 1;
     if (a.hasStaleUpdates && !b.hasStaleUpdates) return -1;
     if (!a.hasStaleUpdates && b.hasStaleUpdates) return 1;
     if (a.problemsCount !== b.problemsCount) return b.problemsCount - a.problemsCount;
-    return a.userName.localeCompare(b.userName);
+    return (a.userName || '').localeCompare(b.userName || '');
   });
 
   const toggleUser = (userId: string) => {
@@ -230,20 +302,29 @@ export default function AdminWorkOverviewPage() {
 
   const getStatusBadgeColor = (status: string) => {
     switch (status) {
-      case 'completed': return 'bg-green-100 text-green-800';
-      case 'in_progress': return 'bg-blue-100 text-blue-800';
-      case 'delayed': return 'bg-red-100 text-red-800';
-      case 'not_started': return 'bg-gray-100 text-gray-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'completed':
+        return 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800';
+      case 'in_progress':
+        return 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800';
+      case 'delayed':
+        return 'bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-300 dark:border-red-800';
+      case 'not_started':
+        return 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700';
+      default:
+        return 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700';
     }
   };
 
   const getPriorityBadgeColor = (priority: string) => {
     switch (priority) {
-      case 'high': return 'bg-red-100 text-red-800';
-      case 'medium': return 'bg-yellow-100 text-yellow-800';
-      case 'low': return 'bg-blue-100 text-blue-800';
-      default: return 'bg-gray-100 text-gray-800';
+      case 'high':
+        return 'bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-300 dark:border-red-800';
+      case 'medium':
+        return 'bg-amber-100 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-300 dark:border-amber-800';
+      case 'low':
+        return 'bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-300 border border-blue-300 dark:border-blue-800';
+      default:
+        return 'bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-300 border border-slate-300 dark:border-slate-700';
     }
   };
 
@@ -260,18 +341,86 @@ export default function AdminWorkOverviewPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Team Work Overview</h1>
-          {activeCycle && (
-            <p className="text-sm text-gray-600 mt-1">
+      <PageHeader
+        title="Team Work Overview"
+        action={
+          activeCycle ? (
+            <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
               Current Cycle: Q{activeCycle.quarter} {activeCycle.year}
-            </p>
-          )}
-        </div>
-      </div>
+            </span>
+          ) : undefined
+        }
+      />
 
-      <div className="bg-gradient-to-r from-blue-50 to-blue-100 border border-blue-200 rounded-lg shadow-sm">
+      {/* Code-Red Emergency Alert Banner */}
+      <CodeRedAlertBanner
+        activeWorks={activeCodeRedWorks}
+        onViewWork={(id) => {
+          setSelectedWorkId(id);
+          setShowDetailModal(true);
+        }}
+      />
+
+      {/* Pending Milestone Change Requests Panel */}
+      {pendingMilestoneRequests.length > 0 && (
+        <div className="bg-gradient-to-r from-amber-950/40 via-slate-900 to-amber-950/40 border-2 border-amber-500/40 rounded-2xl p-5 shadow-lg shadow-amber-950/30 text-white">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-400 border border-amber-500/40 flex items-center justify-center">
+                <GitPullRequest className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-amber-500 text-slate-950">
+                    ACTION REQUIRED
+                  </span>
+                  <h3 className="text-base font-bold text-slate-100">
+                    Pending Milestone Edit Requests ({pendingMilestoneRequests.length})
+                  </h3>
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  Users requested revisions to milestones. Unapproved milestone shifts or deletions are held pending your approval.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {pendingMilestoneRequests.map((req) => (
+              <div
+                key={req.id}
+                className="p-4 rounded-xl bg-slate-800/90 border border-slate-700 text-xs flex flex-col justify-between gap-3 hover:border-amber-400/50 transition-all shadow-md"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-1.5">
+                    <span className="font-mono font-bold text-primary-400">[{req.issue_key}]</span>
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(req.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <div className="font-bold text-slate-100 line-clamp-1">{req.work_title}</div>
+                  <div className="text-[11px] text-slate-400 mt-0.5">
+                    By <strong>{req.requester_name}</strong> {req.requester_department ? `(${req.requester_department})` : ''}
+                  </div>
+                  <div className="text-slate-300 bg-slate-950/70 p-2.5 rounded-lg border border-slate-800 mt-2 line-clamp-2 italic">
+                    &ldquo;{req.reason}&rdquo;
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedChangeRequest(req)}
+                  className="w-full py-2 rounded-lg text-xs font-bold bg-amber-500 hover:bg-amber-400 text-slate-950 text-center transition-all flex items-center justify-center gap-1.5 shadow"
+                >
+                  <GitPullRequest className="w-3.5 h-3.5" />
+                  <span>Review Request ({req.proposed_milestones?.length || 0} Milestones)</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="bg-gradient-to-r from-blue-50 to-blue-100 dark:from-slate-800 dark:to-slate-850 border border-blue-200 dark:border-slate-700 rounded-xl shadow-sm">
           <div
             className="p-4 cursor-pointer"
             onClick={() => setShowMyWorkSection(!showMyWorkSection)}
@@ -281,12 +430,12 @@ export default function AdminWorkOverviewPage() {
                 <div className="bg-blue-600 p-2 rounded-lg">
                   <ClipboardList className="h-5 w-5 text-white" />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900">My Work</h3>
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-slate-100">My Work</h3>
               </div>
               {showMyWorkSection ? (
-                <ChevronUp className="h-5 w-5 text-gray-600" />
+                <ChevronUp className="h-5 w-5 text-gray-600 dark:text-slate-400" />
               ) : (
-                <ChevronDown className="h-5 w-5 text-gray-600" />
+                <ChevronDown className="h-5 w-5 text-gray-600 dark:text-slate-400" />
               )}
             </div>
           </div>
@@ -294,34 +443,34 @@ export default function AdminWorkOverviewPage() {
           {showMyWorkSection && (
             <div className="px-4 pb-4">
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-blue-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-1">
-                    <TrendingUp className="h-4 w-4 text-blue-600" />
-                    <p className="text-xs text-gray-600">Active Work Items</p>
+                    <TrendingUp className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                    <p className="text-xs text-gray-600 dark:text-slate-400">Active Work Items</p>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900">{myWorkSummary.totalWorks}</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{myWorkSummary.totalWorks}</p>
                 </div>
 
-                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-blue-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-1">
-                    <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    <p className="text-xs text-gray-600">Avg Completion</p>
+                    <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-emerald-400" />
+                    <p className="text-xs text-gray-600 dark:text-slate-400">Avg Completion</p>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900">{myWorkSummary.avgCompletion}%</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{myWorkSummary.avgCompletion}%</p>
                 </div>
 
-                <div className="bg-white rounded-lg p-4 border border-blue-200">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-blue-200 dark:border-slate-700">
                   <div className="flex items-center gap-2 mb-1">
-                    <AlertTriangle className="h-4 w-4 text-red-600" />
-                    <p className="text-xs text-gray-600">Open Problems</p>
+                    <AlertTriangle className="h-4 w-4 text-red-600 dark:text-red-400" />
+                    <p className="text-xs text-gray-600 dark:text-slate-400">Open Problems</p>
                   </div>
-                  <p className="text-2xl font-bold text-gray-900">{myWorkSummary.openProblems}</p>
+                  <p className="text-2xl font-bold text-gray-900 dark:text-slate-100">{myWorkSummary.openProblems}</p>
                 </div>
 
-                <div className="bg-white rounded-lg p-4 border border-blue-200 flex items-center justify-center">
+                <div className="bg-white dark:bg-slate-900 rounded-xl p-4 border border-blue-200 dark:border-slate-700 flex items-center justify-center">
                   <button
                     onClick={() => setShowCreateWorkModal(true)}
-                    className="flex items-center gap-2 text-blue-600 hover:text-blue-700 font-medium transition-colors"
+                    className="flex items-center gap-2 text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium transition-colors"
                   >
                     <Plus className="h-4 w-4" />
                     <span>Create Work Entry</span>
@@ -341,17 +490,19 @@ export default function AdminWorkOverviewPage() {
               setActiveCardFilter('usersWithWork');
             }
           }}
-          className={`bg-white border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left ${
-            activeCardFilter === 'usersWithWork' ? 'ring-2 ring-blue-500 border-blue-500' : 'border-gray-200'
+          className={`bg-white dark:bg-slate-900 border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left ${
+            activeCardFilter === 'usersWithWork'
+              ? 'ring-2 ring-blue-500 border-blue-500'
+              : 'border-gray-200 dark:border-slate-800'
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className="bg-blue-100 p-2 rounded-lg">
-              <Users className="h-5 w-5 text-blue-600" />
+            <div className="bg-blue-100 dark:bg-blue-950/60 p-2 rounded-lg">
+              <Users className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <p className="text-xs text-gray-600">Users with Work</p>
-              <p className="text-xl font-bold text-gray-900">
+              <p className="text-xs text-gray-600 dark:text-slate-400">Users with Work</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-slate-100">
                 {statistics.usersWithWork}/{statistics.totalUsers}
               </p>
             </div>
@@ -360,15 +511,15 @@ export default function AdminWorkOverviewPage() {
 
         <button
           onClick={() => setShowNoWorkModal(true)}
-          className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left"
+          className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left"
         >
           <div className="flex items-center gap-3">
-            <div className="bg-red-100 p-2 rounded-lg">
-              <AlertCircle className="h-5 w-5 text-red-600" />
+            <div className="bg-red-100 dark:bg-red-950/60 p-2 rounded-lg">
+              <AlertCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <p className="text-xs text-gray-600">No Work Entries</p>
-              <p className="text-xl font-bold text-gray-900">{statistics.usersWithoutWork}</p>
+              <p className="text-xs text-gray-600 dark:text-slate-400">No Work Entries</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-slate-100">{statistics.usersWithoutWork}</p>
             </div>
           </div>
         </button>
@@ -381,17 +532,19 @@ export default function AdminWorkOverviewPage() {
               setActiveCardFilter('delayed');
             }
           }}
-          className={`bg-white border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left ${
-            activeCardFilter === 'delayed' ? 'ring-2 ring-orange-500 border-orange-500' : 'border-gray-200'
+          className={`bg-white dark:bg-slate-900 border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left ${
+            activeCardFilter === 'delayed'
+              ? 'ring-2 ring-orange-500 border-orange-500'
+              : 'border-gray-200 dark:border-slate-800'
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className="bg-orange-100 p-2 rounded-lg">
-              <Clock className="h-5 w-5 text-orange-600" />
+            <div className="bg-orange-100 dark:bg-orange-950/60 p-2 rounded-lg">
+              <Clock className="h-5 w-5 text-orange-600 dark:text-orange-400" />
             </div>
             <div>
-              <p className="text-xs text-gray-600">Delayed Work</p>
-              <p className="text-xl font-bold text-gray-900">{statistics.delayedWorkCount}</p>
+              <p className="text-xs text-gray-600 dark:text-slate-400">Delayed Work</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-slate-100">{statistics.delayedWorkCount}</p>
             </div>
           </div>
         </button>
@@ -404,33 +557,35 @@ export default function AdminWorkOverviewPage() {
               setActiveCardFilter('highImpactProblems');
             }
           }}
-          className={`bg-white border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left ${
-            activeCardFilter === 'highImpactProblems' ? 'ring-2 ring-red-500 border-red-500' : 'border-gray-200'
+          className={`bg-white dark:bg-slate-900 border rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left ${
+            activeCardFilter === 'highImpactProblems'
+              ? 'ring-2 ring-red-500 border-red-500'
+              : 'border-gray-200 dark:border-slate-800'
           }`}
         >
           <div className="flex items-center gap-3">
-            <div className="bg-red-100 p-2 rounded-lg">
-              <AlertTriangle className="h-5 w-5 text-red-600" />
+            <div className="bg-red-100 dark:bg-red-950/60 p-2 rounded-lg">
+              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
             </div>
             <div>
-              <p className="text-xs text-gray-600">High Impact Problems</p>
-              <p className="text-xl font-bold text-gray-900">{statistics.highImpactProblemsCount}</p>
+              <p className="text-xs text-gray-600 dark:text-slate-400">High Impact Problems</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-slate-100">{statistics.highImpactProblemsCount}</p>
             </div>
           </div>
         </button>
 
         <button
           onClick={() => setShowSupportRequestsModal(true)}
-          className="bg-white border border-gray-200 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left"
+          className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4 hover:shadow-md transition-all cursor-pointer text-left"
         >
           <div className="flex items-center gap-3">
-            <div className="bg-purple-100 p-2 rounded-lg">
-              <TrendingUp className="h-5 w-5 text-purple-600" />
+            <div className="bg-purple-100 dark:bg-purple-950/60 p-2 rounded-lg">
+              <TrendingUp className="h-5 w-5 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <p className="text-xs text-gray-600">Support Requests</p>
-              <p className="text-xl font-bold text-gray-900">
-                {Object.values(statistics.openSupportRequests).reduce((a, b) => a + b, 0)}
+              <p className="text-xs text-gray-600 dark:text-slate-400">Support Requests</p>
+              <p className="text-xl font-bold text-gray-900 dark:text-slate-100">
+                {Object.values(statistics.openSupportRequests || {}).reduce((a, b) => a + b, 0)}
               </p>
             </div>
           </div>
@@ -438,10 +593,10 @@ export default function AdminWorkOverviewPage() {
       </div>
 
       {activeCardFilter && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center justify-between">
+        <div className="bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 rounded-lg p-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-5 w-5 text-blue-600" />
-            <span className="text-sm font-medium text-blue-900">
+            <CheckCircle2 className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            <span className="text-sm font-medium text-blue-900 dark:text-blue-200">
               {activeCardFilter === 'usersWithWork' && 'Showing all users with work assignments'}
               {activeCardFilter === 'delayed' && 'Showing only delayed work entries'}
               {activeCardFilter === 'highImpactProblems' && 'Showing work with high impact problems'}
@@ -449,20 +604,20 @@ export default function AdminWorkOverviewPage() {
           </div>
           <button
             onClick={() => setActiveCardFilter(null)}
-            className="text-sm text-blue-600 hover:text-blue-700 font-medium"
+            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-medium cursor-pointer"
           >
             Clear Filter
           </button>
         </div>
       )}
 
-      <div className="bg-white border border-gray-200 rounded-lg p-4">
-        <h3 className="font-semibold text-gray-900 mb-3">Auto-Flag Alerts</h3>
+      <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg p-4">
+        <h3 className="font-semibold text-gray-900 dark:text-slate-100 mb-3">Auto-Flag Alerts</h3>
         <div className="space-y-2">
           {workData.filter(w => w.days_since_update >= 14).length > 0 && (
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 bg-orange-500 rounded-full animate-pulse"></div>
-              <span className="text-gray-700">
+              <span className="text-gray-700 dark:text-slate-300">
                 {workData.filter(w => w.days_since_update >= 14).length} work item(s) with no update in 14+ days
               </span>
             </div>
@@ -470,7 +625,7 @@ export default function AdminWorkOverviewPage() {
           {statistics.delayedWorkCount > 0 && (
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-              <span className="text-gray-700">
+              <span className="text-gray-700 dark:text-slate-300">
                 {statistics.delayedWorkCount} work item(s) marked as delayed
               </span>
             </div>
@@ -478,7 +633,7 @@ export default function AdminWorkOverviewPage() {
           {statistics.highImpactProblemsCount > 0 && (
             <div className="flex items-center gap-2 text-sm">
               <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-              <span className="text-gray-700">
+              <span className="text-gray-700 dark:text-slate-300">
                 {statistics.highImpactProblemsCount} high-impact problem(s) open
               </span>
             </div>
@@ -486,7 +641,7 @@ export default function AdminWorkOverviewPage() {
           {workData.filter(w => w.days_since_update >= 14).length === 0 &&
            statistics.delayedWorkCount === 0 &&
            statistics.highImpactProblemsCount === 0 && (
-            <div className="flex items-center gap-2 text-sm text-green-700">
+            <div className="flex items-center gap-2 text-sm text-green-700 dark:text-emerald-400">
               <CheckCircle2 className="h-4 w-4" />
               <span>No critical alerts at this time</span>
             </div>
@@ -494,72 +649,31 @@ export default function AdminWorkOverviewPage() {
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg">
-        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">Who is Working on What</h2>
+      <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-lg transition-colors">
+        <div className="px-6 py-4 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-slate-100">Who is Working on What</h2>
           <button
             onClick={toggleExpandAll}
-            className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            className="text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-medium"
           >
             {expandAll ? 'Collapse All' : 'Expand All'}
           </button>
         </div>
 
-        <div className="p-4 border-b border-gray-200 bg-gray-50">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-            <input
-              type="text"
-              placeholder="Search..."
-              value={filters.search}
-              onChange={(e) => setFilters({ ...filters, search: e.target.value })}
-              className="px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            />
-            {(hasPermission('manage_work_cycles') || hasPermission('manage_users')) && (
-              <select
-                value={filters.user}
-                onChange={(e) => setFilters({ ...filters, user: e.target.value })}
-                className="px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-              >
-                <option value="">All Users</option>
-                {Array.from(new Set(workData.map(w => w.user_name))).sort().map(userName => (
-                  <option key={userName} value={userName}>{userName}</option>
-                ))}
-              </select>
-            )}
-            <input
-              type="text"
-              placeholder="Filter by project..."
-              value={filters.project}
-              onChange={(e) => setFilters({ ...filters, project: e.target.value })}
-              className="px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            />
-            <select
-              value={filters.status}
-              onChange={(e) => setFilters({ ...filters, status: e.target.value })}
-              className="px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            >
-              <option value="">All Statuses</option>
-              <option value="not_started">Not Started</option>
-              <option value="in_progress">In Progress</option>
-              <option value="delayed">Delayed</option>
-              <option value="completed">Completed</option>
-            </select>
-            <select
-              value={filters.priority}
-              onChange={(e) => setFilters({ ...filters, priority: e.target.value })}
-              className="px-3 py-2 h-[42px] bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm"
-            >
-              <option value="">All Priorities</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-            </select>
-          </div>
+        <div className="p-4 border-b border-gray-200 dark:border-slate-800 bg-gray-50/50 dark:bg-slate-850/50">
+          <WorkFilterToolbar
+            filters={customFilters}
+            onChange={setCustomFilters}
+            totalCount={workData.length}
+            filteredCount={filteredData.length}
+            codeRedCount={activeCodeRedWorks.length}
+            pendingApprovalCount={pendingMilestoneRequests.length}
+          />
         </div>
 
         <div className="p-6 space-y-4">
           {groupedUsers.length === 0 ? (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-8 text-gray-500 dark:text-slate-400">
               No work entries found
             </div>
           ) : (
@@ -568,34 +682,34 @@ export default function AdminWorkOverviewPage() {
                 key={user.userId}
                 className={`border-2 rounded-lg overflow-hidden transition-all ${
                   user.hasDelayed
-                    ? 'border-red-400 shadow-md'
+                    ? 'border-red-400 dark:border-red-600/70 shadow-md shadow-red-950/20'
                     : user.hasStaleUpdates
-                    ? 'border-orange-400 shadow-md'
-                    : 'border-gray-200'
+                    ? 'border-orange-400 dark:border-orange-600/70 shadow-md shadow-orange-950/20'
+                    : 'border-gray-200 dark:border-slate-800'
                 }`}
               >
                 <div
                   onClick={() => toggleUser(user.userId)}
-                  className="bg-gradient-to-r from-gray-50 to-white p-4 cursor-pointer hover:from-gray-100 hover:to-gray-50 transition-colors"
+                  className="bg-gradient-to-r from-gray-50 to-white dark:from-slate-800 dark:to-slate-850 dark:bg-slate-850 p-4 cursor-pointer hover:from-gray-100 hover:to-gray-50 dark:hover:from-slate-750 dark:hover:to-slate-800 transition-colors"
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4 flex-1">
                       <div>
-                        <h3 className="font-semibold text-gray-900 text-lg">{user.userName}</h3>
-                        <p className="text-sm text-gray-600">{user.department}</p>
+                        <h3 className="font-semibold text-gray-900 dark:text-slate-100 text-lg">{user.userName}</h3>
+                        <p className="text-sm text-gray-600 dark:text-slate-400">{user.department}</p>
                       </div>
                       <div className="flex items-center gap-4 ml-8">
                         <div className="text-center">
-                          <p className="text-xs text-gray-500">Total Items</p>
-                          <p className="text-lg font-bold text-gray-900">{user.works.length}</p>
+                          <p className="text-xs text-gray-500 dark:text-slate-400">Total Items</p>
+                          <p className="text-lg font-bold text-gray-900 dark:text-slate-100">{user.works.length}</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-xs text-gray-500">Avg Progress</p>
-                          <p className="text-lg font-bold text-blue-600">{user.avgProgress}%</p>
+                          <p className="text-xs text-gray-500 dark:text-slate-400">Avg Progress</p>
+                          <p className="text-lg font-bold text-blue-600 dark:text-blue-400">{user.avgProgress}%</p>
                         </div>
                         <div className="text-center">
-                          <p className="text-xs text-gray-500">Problems</p>
-                          <p className={`text-lg font-bold ${user.problemsCount > 0 ? 'text-red-600' : 'text-green-600'}`}>
+                          <p className="text-xs text-gray-500 dark:text-slate-400">Problems</p>
+                          <p className={`text-lg font-bold ${user.problemsCount > 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-emerald-400'}`}>
                             {user.problemsCount}
                           </p>
                         </div>
@@ -603,83 +717,124 @@ export default function AdminWorkOverviewPage() {
                     </div>
                     <div className="flex items-center gap-3">
                       {user.hasDelayed && (
-                        <span className="px-2 py-1 bg-red-100 text-red-800 text-xs font-medium rounded">
+                        <span className="px-2 py-1 bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-300 dark:border-red-800 text-xs font-medium rounded">
                           Delayed Work
                         </span>
                       )}
                       {user.hasStaleUpdates && (
-                        <span className="px-2 py-1 bg-orange-100 text-orange-800 text-xs font-medium rounded">
+                        <span className="px-2 py-1 bg-orange-100 dark:bg-orange-950/60 text-orange-800 dark:text-orange-300 border border-orange-300 dark:border-orange-800 text-xs font-medium rounded">
                           Stale Updates
                         </span>
                       )}
                       {expandedUsers.has(user.userId) ? (
-                        <ChevronUp className="h-5 w-5 text-gray-400" />
+                        <ChevronUp className="h-5 w-5 text-gray-400 dark:text-slate-400" />
                       ) : (
-                        <ChevronDown className="h-5 w-5 text-gray-400" />
+                        <ChevronDown className="h-5 w-5 text-gray-400 dark:text-slate-400" />
                       )}
                     </div>
                   </div>
                 </div>
 
                 {expandedUsers.has(user.userId) && (
-                  <div className="bg-white">
+                  <div className="bg-white dark:bg-slate-900">
                     <div className="overflow-x-auto">
                       <table className="w-full">
-                        <thead className="bg-gray-50 border-y border-gray-200">
+                        <thead className="bg-gray-50 dark:bg-slate-800/80 border-y border-gray-200 dark:border-slate-700">
                           <tr>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Project</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Work Title</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Progress</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Priority</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Problems</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Flags</th>
-                            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Key</th>
+                            <th className="px-3 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Type</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Work Title / Project</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Status</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Progress</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Priority</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Alerts / Links</th>
+                            <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 dark:text-slate-400 uppercase">Actions</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-200">
-                          {user.works.map((work) => (
-                            <tr key={work.work_id} className="hover:bg-gray-50">
-                              <td className="px-4 py-3 text-sm text-gray-900">{work.project_name}</td>
-                              <td className="px-4 py-3 text-sm text-gray-900">{work.work_title}</td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 text-xs font-medium rounded ${getStatusBadgeColor(work.latest_status)}`}>
-                                  {work.latest_status.replace('_', ' ').toUpperCase()}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  <div className="w-20 bg-gray-200 rounded-full h-2">
-                                    <div
-                                      className="bg-blue-600 h-2 rounded-full"
-                                      style={{ width: `${work.completion_percentage}%` }}
-                                    ></div>
+                        <tbody className="divide-y divide-gray-200 dark:divide-slate-800">
+                          {user.works.map((work) => {
+                            const isCodeRed = work.priority === 'code_red';
+                            return (
+                              <tr
+                                key={work.work_id}
+                                className={`transition-colors ${
+                                  isCodeRed
+                                    ? 'bg-red-50/50 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30'
+                                    : 'hover:bg-gray-50 dark:hover:bg-slate-800/50'
+                                }`}
+                              >
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <IssueKeyTag
+                                    issueKey={work.issue_key}
+                                    onClick={() => {
+                                      setSelectedUserWork(work);
+                                      setSelectedWorkId(work.work_id);
+                                      setShowDetailModal(true);
+                                    }}
+                                  />
+                                </td>
+                                <td className="px-3 py-3 whitespace-nowrap">
+                                  <IssueTypeBadge type={work.issue_type} showLabel={false} />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="font-semibold text-sm text-gray-900 dark:text-slate-100">{work.work_title}</div>
+                                  <div className="text-xs text-gray-500 dark:text-slate-400">{work.project_name}</div>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <span className={`px-2 py-1 text-xs font-medium rounded ${getStatusBadgeColor(work.latest_status)}`}>
+                                    {work.latest_status.replace('_', ' ').toUpperCase()}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <div className="flex items-center gap-2">
+                                    <div className="w-16 bg-gray-200 dark:bg-slate-700 rounded-full h-2">
+                                      <div
+                                        className="bg-blue-600 dark:bg-blue-500 h-2 rounded-full"
+                                        style={{ width: `${work.completion_percentage}%` }}
+                                      ></div>
+                                    </div>
+                                    <span className="text-xs text-gray-600 dark:text-slate-400 font-semibold">{work.completion_percentage}%</span>
                                   </div>
-                                  <span className="text-xs text-gray-600">{work.completion_percentage}%</span>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3">
-                                <span className={`px-2 py-1 text-xs font-medium rounded ${getPriorityBadgeColor(work.priority)}`}>
-                                  {work.priority.toUpperCase()}
-                                </span>
-                              </td>
-                              <td className="px-4 py-3 text-sm">
-                                {work.open_problems_count > 0 ? (
-                                  <span className="text-red-600 font-medium">{work.open_problems_count}</span>
-                                ) : (
-                                  <span className="text-gray-400">0</span>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <div className="flex items-center gap-2">
-                                  {work.days_since_update >= 14 && (
-                                    <div className="w-2 h-2 bg-orange-500 rounded-full" title="No update in 14+ days"></div>
-                                  )}
-                                  {work.latest_status === 'delayed' && (
-                                    <div className="w-2 h-2 bg-red-500 rounded-full" title="Delayed status"></div>
-                                  )}
-                                </div>
-                              </td>
+                                </td>
+                                <td className="px-4 py-3 whitespace-nowrap">
+                                  <WorkPriorityBadge priority={work.priority} />
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    {work.latest_status === 'delayed' && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-100 dark:bg-red-950/80 text-red-800 dark:text-red-200 border border-red-300 dark:border-red-700 animate-pulse">
+                                        <AlertTriangle className="w-3 h-3 text-red-600 dark:text-red-400" />
+                                        Delayed by {work.user_name || 'Assignee'}
+                                      </span>
+                                    )}
+                                    {isCodeRed && (
+                                      <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white animate-pulse">
+                                        <Flame className="w-3 h-3" />
+                                        CODE-RED
+                                      </span>
+                                    )}
+                                    {(work.blocked_by_code_red_count ?? 0) > 0 && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-900 dark:text-amber-300 border border-amber-300 dark:border-amber-700">
+                                        🚨 Code-Red Blocked
+                                      </span>
+                                    )}
+                                    {(work.pending_milestone_requests_count ?? 0) > 0 && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-100 dark:bg-blue-950/60 text-blue-900 dark:text-blue-300 border border-blue-300 dark:border-blue-700">
+                                        📋 Edit Pending
+                                      </span>
+                                    )}
+                                    {work.days_since_update >= 14 && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-orange-100 dark:bg-orange-950/60 text-orange-800 dark:text-orange-300 border border-orange-300 dark:border-orange-800">
+                                        14d+ stale
+                                      </span>
+                                    )}
+                                    {work.open_problems_count > 0 && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-300 dark:border-red-800">
+                                        {work.open_problems_count} problem(s)
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
                               <td className="px-4 py-3">
                                 <div className="flex items-center gap-2">
                                   <button
@@ -691,7 +846,7 @@ export default function AdminWorkOverviewPage() {
                                         setSelectedWorkId(work.work_id);
                                       }
                                     }}
-                                    className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 transition-colors"
+                                    className="inline-flex items-center gap-1 text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 transition-colors cursor-pointer"
                                     title="View details"
                                   >
                                     <Eye className="h-4 w-4" />
@@ -704,7 +859,7 @@ export default function AdminWorkOverviewPage() {
                                         setWorkIdToEdit(work.work_id);
                                         setShowEditWorkModal(true);
                                       }}
-                                      className="inline-flex items-center gap-1 text-emerald-600 hover:text-emerald-800 transition-colors border-l pl-2 ml-1"
+                                      className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 hover:text-emerald-800 dark:hover:text-emerald-300 transition-colors border-l border-gray-200 dark:border-slate-700 pl-2 ml-1 cursor-pointer"
                                       title="Edit"
                                     >
                                       <Edit2 className="h-4 w-4" />
@@ -714,7 +869,8 @@ export default function AdminWorkOverviewPage() {
                                 </div>
                               </td>
                             </tr>
-                          ))}
+                          );
+                        })}
                         </tbody>
                       </table>
                     </div>
@@ -727,13 +883,13 @@ export default function AdminWorkOverviewPage() {
       </div>
 
       {showNoWorkModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[600px] overflow-hidden">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Users Without Work Assignments</h2>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[600px] overflow-hidden">
+            <div className="p-6 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-slate-100">Users Without Work Assignments</h2>
               <button
                 onClick={() => setShowNoWorkModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-6 h-6" />
               </button>
@@ -742,18 +898,18 @@ export default function AdminWorkOverviewPage() {
               {usersWithoutWork.length === 0 ? (
                 <div className="text-center py-8">
                   <CheckCircle2 className="w-12 h-12 text-green-500 mx-auto mb-2" />
-                  <p className="text-gray-600">All users have work assignments!</p>
+                  <p className="text-gray-600 dark:text-slate-400">All users have work assignments!</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {usersWithoutWork.map((user) => (
-                    <div key={user.id} className="p-4 border border-gray-200 rounded-lg hover:bg-gray-50">
+                    <div key={user.id} className="p-4 border border-gray-200 dark:border-slate-800 rounded-xl hover:bg-gray-50 dark:hover:bg-slate-800/50 transition">
                       <div className="flex items-start justify-between">
                         <div>
-                          <h3 className="font-semibold text-gray-900">{user.full_name}</h3>
-                          <p className="text-sm text-gray-600">{user.department || 'No department'}</p>
+                          <h3 className="font-semibold text-gray-900 dark:text-slate-100">{user.full_name}</h3>
+                          <p className="text-sm text-gray-600 dark:text-slate-400">{user.department || 'No department'}</p>
                         </div>
-                        <span className="px-2 py-1 bg-red-100 text-red-800 text-xs rounded">No Work</span>
+                        <span className="px-2 py-1 bg-red-100 dark:bg-red-950/60 text-red-800 dark:text-red-300 border border-red-300 dark:border-red-800 text-xs rounded font-medium">No Work</span>
                       </div>
                     </div>
                   ))}
@@ -765,75 +921,75 @@ export default function AdminWorkOverviewPage() {
       )}
 
       {showSupportRequestsModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full">
-            <div className="p-6 border-b border-gray-200 flex items-center justify-between">
-              <h2 className="text-xl font-bold text-gray-900">Support Requests Breakdown</h2>
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-slate-900 border border-gray-200 dark:border-slate-800 rounded-2xl shadow-2xl max-w-2xl w-full">
+            <div className="p-6 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
+              <h2 className="text-xl font-bold text-gray-900 dark:text-slate-100">Support Requests Breakdown</h2>
               <button
                 onClick={() => setShowSupportRequestsModal(false)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-slate-200 cursor-pointer"
               >
                 <X className="w-6 h-6" />
               </button>
             </div>
             <div className="p-6">
               <div className="space-y-4">
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-800/40">
                   <div className="flex items-center gap-3">
-                    <div className="bg-blue-100 p-2 rounded-lg">
-                      <Users className="w-5 h-5 text-blue-600" />
+                    <div className="bg-blue-100 dark:bg-blue-950/60 p-2 rounded-lg">
+                      <Users className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">Supervisor Support</p>
-                      <p className="text-sm text-gray-600">Requests requiring supervisor action</p>
+                      <p className="font-medium text-gray-900 dark:text-slate-100">Supervisor Support</p>
+                      <p className="text-sm text-gray-600 dark:text-slate-400">Requests requiring supervisor action</p>
                     </div>
                   </div>
-                  <span className="text-2xl font-bold text-gray-900">{statistics.openSupportRequests.supervisor}</span>
+                  <span className="text-2xl font-bold text-gray-900 dark:text-slate-100">{statistics.openSupportRequests.supervisor}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-800/40">
                   <div className="flex items-center gap-3">
-                    <div className="bg-purple-100 p-2 rounded-lg">
-                      <Users className="w-5 h-5 text-purple-600" />
+                    <div className="bg-purple-100 dark:bg-purple-950/60 p-2 rounded-lg">
+                      <Users className="w-5 h-5 text-purple-600 dark:text-purple-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">Admin Support</p>
-                      <p className="text-sm text-gray-600">Requests requiring admin action</p>
+                      <p className="font-medium text-gray-900 dark:text-slate-100">Admin Support</p>
+                      <p className="text-sm text-gray-600 dark:text-slate-400">Requests requiring admin action</p>
                     </div>
                   </div>
-                  <span className="text-2xl font-bold text-gray-900">{statistics.openSupportRequests.admin}</span>
+                  <span className="text-2xl font-bold text-gray-900 dark:text-slate-100">{statistics.openSupportRequests.admin}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-800/40">
                   <div className="flex items-center gap-3">
-                    <div className="bg-orange-100 p-2 rounded-lg">
-                      <Users className="w-5 h-5 text-orange-600" />
+                    <div className="bg-orange-100 dark:bg-orange-950/60 p-2 rounded-lg">
+                      <Users className="w-5 h-5 text-orange-600 dark:text-orange-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">Facility SPOC</p>
-                      <p className="text-sm text-gray-600">Facility-related support requests</p>
+                      <p className="font-medium text-gray-900 dark:text-slate-100">Facility SPOC</p>
+                      <p className="text-sm text-gray-600 dark:text-slate-400">Facility-related support requests</p>
                     </div>
                   </div>
-                  <span className="text-2xl font-bold text-gray-900">{statistics.openSupportRequests.facility_spoc}</span>
+                  <span className="text-2xl font-bold text-gray-900 dark:text-slate-100">{statistics.openSupportRequests.facility_spoc}</span>
                 </div>
 
-                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                <div className="flex items-center justify-between p-4 border border-gray-200 dark:border-slate-800 rounded-xl bg-slate-50/50 dark:bg-slate-800/40">
                   <div className="flex items-center gap-3">
-                    <div className="bg-green-100 p-2 rounded-lg">
-                      <ShoppingCart className="w-5 h-5 text-green-600" />
+                    <div className="bg-green-100 dark:bg-emerald-950/60 p-2 rounded-lg">
+                      <ShoppingCart className="w-5 h-5 text-green-600 dark:text-emerald-400" />
                     </div>
                     <div>
-                      <p className="font-medium text-gray-900">Procurement</p>
-                      <p className="text-sm text-gray-600">Purchase-related support requests</p>
+                      <p className="font-medium text-gray-900 dark:text-slate-100">Procurement</p>
+                      <p className="text-sm text-gray-600 dark:text-slate-400">Purchase-related support requests</p>
                     </div>
                   </div>
-                  <span className="text-2xl font-bold text-gray-900">{statistics.openSupportRequests.procurement}</span>
+                  <span className="text-2xl font-bold text-gray-900 dark:text-slate-100">{statistics.openSupportRequests.procurement}</span>
                 </div>
 
-                <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+                <div className="mt-6 p-4 bg-gray-50 dark:bg-slate-800/60 rounded-xl border border-gray-200 dark:border-slate-700">
                   <div className="flex items-center justify-between">
-                    <span className="font-semibold text-gray-900">Total Open Requests</span>
-                    <span className="text-2xl font-bold text-gray-900">
+                    <span className="font-semibold text-gray-900 dark:text-slate-100">Total Open Requests</span>
+                    <span className="text-2xl font-bold text-gray-900 dark:text-slate-100">
                       {Object.values(statistics.openSupportRequests).reduce((a, b) => a + b, 0)}
                     </span>
                   </div>
@@ -844,11 +1000,18 @@ export default function AdminWorkOverviewPage() {
         </div>
       )}
 
+
       {selectedWorkId && (
         <AdminWorkDetailModal
           workId={selectedWorkId}
           onClose={() => {
             setSelectedWorkId(null);
+            const params = new URLSearchParams(window.location.search);
+            if (params.has('workId')) {
+              params.delete('workId');
+              const newQuery = params.toString();
+              navigate({ search: newQuery ? `?${newQuery}` : '' }, { replace: true });
+            }
             fetchData();
           }}
         />
@@ -862,6 +1025,12 @@ export default function AdminWorkOverviewPage() {
             onClose={() => {
               setShowDetailModal(false);
               setSelectedUserWork(null);
+              const params = new URLSearchParams(window.location.search);
+              if (params.has('workId')) {
+                params.delete('workId');
+                const newQuery = params.toString();
+                navigate({ search: newQuery ? `?${newQuery}` : '' }, { replace: true });
+              }
               fetchData();
             }}
             onEdit={() => {
@@ -946,6 +1115,17 @@ export default function AdminWorkOverviewPage() {
           }}
         />
       )}
+
+      {/* Admin Milestone Change Request Review Modal */}
+      <MilestoneChangeRequestReviewModal
+        isOpen={Boolean(selectedChangeRequest)}
+        onClose={() => setSelectedChangeRequest(null)}
+        request={selectedChangeRequest}
+        onReviewed={() => {
+          setSelectedChangeRequest(null);
+          fetchData();
+        }}
+      />
     </div>
   );
 }

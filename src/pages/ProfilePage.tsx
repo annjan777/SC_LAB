@@ -5,6 +5,7 @@ import { api, authApi } from '../lib/api';
 import { Save, Plus, X, User, Briefcase, Phone, Award, Lock, Eye, EyeOff, Code, Box, Cpu, Clock } from 'lucide-react';
 import AutocompleteInput from '../components/AutocompleteInput';
 import { calculateTenure } from '../utils/tenureUtils';
+import { PageHeader, Button } from '../components/ui';
 
 interface UserSkill {
   id: string;
@@ -31,6 +32,7 @@ interface UserProcess {
 }
 
 export default function ProfilePage() {
+  const [emailChangePassword, setEmailChangePassword] = useState('');
   const { profile, reloadProfile, refreshSkillStatus } = useAuth();
   const location = useLocation();
   const [loading, setLoading] = useState(false);
@@ -212,6 +214,7 @@ export default function ProfilePage() {
         remarks_staff: formData.remarks_staff || null,
         gender: formData.gender || null,
         updated_at: new Date().toISOString(),
+        ...(emailChangePassword ? { currentPassword: emailChangePassword } : {}),
       };
 
       const { error } = await api.put('/api/users/' + profile?.id, sanitizedData);
@@ -402,18 +405,15 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">My Profile</h1>
-        <p className="text-gray-600 mt-2">Manage your personal information and expertise</p>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader title="My Profile" />
 
       {message && (
         <div
-          className={`mb-6 p-4 rounded-lg ${
+          className={`p-4 rounded-xl border ${
             message.type === 'success'
-              ? 'bg-green-50 border border-green-200 text-green-800'
-              : 'bg-red-50 border border-red-200 text-red-800'
+              ? 'bg-green-50 dark:bg-emerald-950/40 border-green-200 dark:border-emerald-800 text-green-800 dark:text-emerald-300'
+              : 'bg-red-50 dark:bg-red-950/40 border-red-200 dark:border-red-800 text-red-800 dark:text-red-300'
           }`}
         >
           {message.text}
@@ -421,10 +421,10 @@ export default function ProfilePage() {
       )}
 
       <div className="space-y-6">
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
           <div className="flex items-center space-x-2 mb-6">
-            <User className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-bold text-gray-900">Basic Information</h2>
+            <User className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100">Basic Information</h2>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-6">
@@ -511,6 +511,16 @@ export default function ProfilePage() {
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                     className="w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
+                  {profile?.email && formData.email.trim().toLowerCase() !== String(profile.email).toLowerCase() && (
+                    <input
+                      type="password"
+                      aria-label="Current password (required to change your email)"
+                      placeholder="Current password to confirm the email change"
+                      value={emailChangePassword}
+                      onChange={(e) => setEmailChangePassword(e.target.value)}
+                      className="mt-2 w-full px-4 py-2 h-[42px] border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  )}
                 </div>
 
                 <div>
@@ -806,15 +816,15 @@ export default function ProfilePage() {
 
         <div
           id="skills-section"
-          className={`bg-white rounded-xl shadow-sm border transition-all duration-500 p-6 ${
+          className={`bg-white dark:bg-slate-900 rounded-xl shadow-sm border transition-all duration-500 p-5 sm:p-6 ${
             highlightSkills
-              ? 'border-blue-500 ring-4 ring-blue-100 shadow-xl scale-[1.01]'
-              : 'border-gray-200'
+              ? 'border-blue-500 ring-4 ring-blue-100 dark:ring-blue-950/60 shadow-xl scale-[1.01]'
+              : 'border-gray-200 dark:border-slate-800'
           }`}
         >
           <div className="flex items-center space-x-2 mb-6">
-            <Award className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-bold text-gray-900">Skills & Expertise</h2>
+            <Award className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100">Skills & Expertise</h2>
           </div>
 
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -881,10 +891,10 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
           <div className="flex items-center space-x-2 mb-6">
-            <Code className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-bold text-gray-900">Software Proficiency</h2>
+            <Code className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100">Software Proficiency</h2>
           </div>
 
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -951,10 +961,10 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
           <div className="flex items-center space-x-2 mb-6">
-            <Box className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-bold text-gray-900">Equipment Experience</h2>
+            <Box className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100">Equipment Experience</h2>
           </div>
 
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -1021,10 +1031,10 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
           <div className="flex items-center space-x-2 mb-6">
-            <Cpu className="w-5 h-5 text-blue-600" />
-            <h2 className="text-xl font-bold text-gray-900">Process Experience</h2>
+            <Cpu className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+            <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100">Process Experience</h2>
           </div>
 
           <div className="mb-6 p-4 bg-gray-50 rounded-lg">
@@ -1091,11 +1101,11 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+        <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center space-x-2">
-              <Lock className="w-5 h-5 text-blue-600" />
-              <h2 className="text-xl font-bold text-gray-900">Change Password</h2>
+              <Lock className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              <h2 className="text-lg font-bold text-gray-900 dark:text-slate-100">Change Password</h2>
             </div>
           </div>
 
@@ -1194,6 +1204,7 @@ export default function ProfilePage() {
             </div>
           </form>
         </div>
+
       </div>
     </div>
   );

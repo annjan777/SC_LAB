@@ -3,8 +3,14 @@ import crypto from 'crypto';
 import { query, transaction } from '../config/database.js';
 export async function initializeSuperAdmin() {
     try {
-        // Ensure default permissions for user role are present
-        await query(`
+        // Default permissions for the 'user' role are seeded ONCE per database. Running this on every
+        // boot silently re-granted (or re-revoked) permissions an administrator had changed in Settings.
+        // Existing databases keep whatever grants they already have; the first boot after this change
+        // applies the defaults one last time (idempotent) and records the marker.
+        await query(`CREATE TABLE IF NOT EXISTS app_migrations (key text PRIMARY KEY, applied_at timestamptz DEFAULT now())`);
+        const userGrantsApplied = await query(`SELECT 1 FROM app_migrations WHERE key = 'initadmin_default_user_grants_v1'`);
+        if (userGrantsApplied.rows.length === 0) {
+            await query(`
       DELETE FROM role_permissions
       WHERE role_id = (SELECT id FROM roles WHERE LOWER(name) = 'user')
         AND permission_id IN (
@@ -12,20 +18,22 @@ export async function initializeSuperAdmin() {
           WHERE name IN ('view_leaves', 'view_procurement', 'view_reports', 'generate_reports', 'view_users')
         );
     `);
-        await query(`
+            await query(`
       INSERT INTO role_permissions (role_id, permission_id)
       SELECT r.id, p.id FROM roles r, permissions p 
       WHERE LOWER(r.name) = 'user' 
         AND p.name IN (
           'create_leave_request', 
           'create_purchase_request', 
-          'create_work', 'edit_work', 'view_work', 
+          'create_work', 'view_work', 
           'view_inventory', 'create_inventory', 'edit_inventory', 
           'view_settings', 
           'view_notifications', 'view_facilities'
         )
       ON CONFLICT DO NOTHING;
     `);
+            await query(`INSERT INTO app_migrations (key) VALUES ('initadmin_default_user_grants_v1') ON CONFLICT DO NOTHING`);
+        }
         // Ensure all user_profiles have a role_id mapped
         await query(`
       UPDATE user_profiles up

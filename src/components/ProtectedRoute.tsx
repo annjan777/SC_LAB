@@ -47,9 +47,10 @@ export default function ProtectedRoute({
   }
 
   if (requiredPermissions && requiredPermissions.length > 0) {
-    const hasAccess = requireAll
+    const isAdmin = profile?.user_role === 'admin' || profile?.user_role === 'super_admin';
+    const hasAccess = isAdmin || (requireAll
       ? hasAllPermissions(requiredPermissions)
-      : hasAnyPermission(requiredPermissions);
+      : hasAnyPermission(requiredPermissions));
 
     if (!hasAccess) {
       return <Navigate to="/dashboard" replace />;

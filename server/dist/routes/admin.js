@@ -1,13 +1,27 @@
 // Admin route aliases + additional admin-specific endpoints
 import { Router } from 'express';
 import bcrypt from 'bcryptjs';
-import { query } from '../config/database.js';
+import { query, transaction } from '../config/database.js';
 import { authenticate, requirePermission } from '../middleware/auth.js';
 import { sendTempPasswordEmail, generateTempPassword } from '../utils/email.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
 import { createNotification } from '../services/notificationService.js';
+import { notifyWorkComment } from '../services/workNotificationService.js';
 import { extractIndianPhone, validateEmail } from '../utils/userValidation.js';
+import { syncOverdueMilestones } from './work.js';
 const router = Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+// The seeded bootstrap administrator is protected exactly like a super_admin account.
+const BOOTSTRAP_SUPER_ADMIN_ID = '00000000-0000-0000-0000-000000000001';
+function isSuperAdminRoleName(name) {
+    const n = String(name || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+    return n === 'super_admin' || n === 'superadmin';
+}
+router.param('id', (req, res, next, id) => {
+    if (!UUID_RE.test(String(id)))
+        return res.status(400).json({ error: 'Invalid id' });
+    next();
+});
 function isValidPassword(password) {
     return password.length >= 8 && /[a-z]/.test(password) && /[A-Z]/.test(password) && /[0-9]/.test(password);
 }
@@ -15,7 +29,14 @@ function isValidPassword(password) {
 // POST /api/admin/users - create user (admin creating a user)
 router.post('/users', authenticate, requirePermission('manage_users'), async (req, res) => {
     try {
-        const { email, password, full_name, role, role_id, phone } = req.body;
+        const { email, password, role, role_id, phone } = req.body;
+        const full_name = typeof req.body.full_name === 'string' ? req.body.full_name.trim().replace(/\s+/g, ' ') : '';
+        if (!full_name) {
+            return res.status(400).json({ error: 'Full name is required' });
+        }
+        if (full_name.length > 150) {
+            return res.status(400).json({ error: 'Full name must be 150 characters or fewer' });
+        }
         // Validate email domain and format
         const emailValidation = validateEmail(email);
         if (!emailValidation.isValid) {
@@ -43,6 +64,9 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
         let resolvedRoleId = role_id;
         let resolvedRoleName = requestedRole;
         if (resolvedRoleId) {
+            if (!UUID_RE.test(String(resolvedRoleId))) {
+                return res.status(400).json({ error: 'Invalid role_id: role does not exist in the system.' });
+            }
             const r = await query('SELECT name FROM roles WHERE id = $1', [resolvedRoleId]);
             if (r.rows.length === 0) {
                 return res.status(400).json({ error: 'Invalid role_id: role does not exist in the system.' });
@@ -50,7 +74,7 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
             resolvedRoleName = r.rows[0].name;
         }
         else {
-            const r = await query('SELECT id, name FROM roles WHERE LOWER(name) = $1', [requestedRole.toLowerCase()]);
+            const r = await query('SELECT id, name FROM roles WHERE LOWER(name) = $1', [String(requestedRole).toLowerCase()]);
             if (r.rows.length === 0) {
                 return res.status(400).json({ error: `Invalid role: '${requestedRole}'. Role does not exist in the system.` });
             }
@@ -60,21 +84,42 @@ router.post('/users', authenticate, requirePermission('manage_users'), async (re
         if (resolvedRoleName.toLowerCase() === 'admin') {
             return res.status(400).json({ error: 'Admin accounts cannot be created directly. Create the user first, then promote them to Admin from Settings.' });
         }
+        const callerIsAdmin = ['admin', 'super_admin'].includes(req.user.user_role);
+        if (!callerIsAdmin && resolvedRoleName.toLowerCase() !== 'user') {
+            return res.status(403).json({ error: 'Only administrators can create users with a role other than the default member role' });
+        }
+        if (isSuperAdminRoleName(resolvedRoleName) || isSuperAdminRoleName(requestedRole)) {
+            return res.status(400).json({ error: 'Super admin accounts cannot be created from the portal' });
+        }
         const userResult = await query('INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email', [cleanEmail, hash]);
         const userId = userResult.rows[0].id;
         await query(`INSERT INTO user_profiles (id, full_name, email, phone, user_role, role_id, require_password_change, is_profile_completed, temp_password_expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, true, false, NOW() + INTERVAL '24 hours')`, [userId, full_name || 'New User', cleanEmail, cleanPhone, resolvedRoleName.toLowerCase(), resolvedRoleId]);
-        sendTempPasswordEmail(cleanEmail, full_name || 'New User', generatedPassword).then(emailResult => {
-            if (!emailResult.success) {
-                console.log(`[DEV MODE] Password for ${cleanEmail}: ${generatedPassword}`);
+       VALUES ($1, $2, $3, $4, $5, $6, true, false, NOW() + INTERVAL '24 hours')`, [userId, full_name, cleanEmail, cleanPhone, tierForRole(resolvedRoleName), resolvedRoleId]);
+        // Report the real delivery result so the admin knows whether to share the temporary password manually.
+        let emailSent = false;
+        let emailError;
+        try {
+            const emailResult = await Promise.race([
+                sendTempPasswordEmail(cleanEmail, full_name, generatedPassword),
+                new Promise(resolve => setTimeout(() => resolve({ success: false, error: 'Email server did not respond in time' }), 15000)),
+            ]);
+            emailSent = Boolean(emailResult?.success);
+            if (!emailSent) {
+                emailError = emailResult?.error ? String(emailResult.error) : 'Email could not be sent';
+                console.warn(`[ADMIN] Failed to dispatch temporary password email to ${cleanEmail}`);
             }
-        }).catch(err => console.error('Background email error:', err));
+        }
+        catch (mailErr) {
+            emailError = mailErr?.message || 'Email could not be sent';
+            console.error('Temporary password email error:', mailErr);
+        }
         const profileResult = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
         res.status(201).json({
             ...profileResult.rows[0],
-            password: generatedPassword,
-            email_sent: true,
-            email_error: undefined,
+            // Returned only when the email could not be delivered, so the admin can hand it over manually.
+            ...(emailSent ? {} : { password: generatedPassword }),
+            email_sent: emailSent,
+            email_error: emailError,
         });
     }
     catch (err) {
@@ -130,6 +175,9 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
         const generatedPassword = password || generateTempPassword();
         const hash = await bcrypt.hash(generatedPassword, 10);
         const userRole = role || 'user';
+        if (isSuperAdminRoleName(userRole)) {
+            return res.status(400).json({ error: 'Super admin accounts cannot be created from the portal' });
+        }
         if (userRole.toLowerCase() === 'admin') {
             return res.status(400).json({ error: 'Admin accounts cannot be created via bulk import. Import the user first, then promote them to Admin from Settings.' });
         }
@@ -250,7 +298,7 @@ router.post('/users/bulk-import-single', authenticate, requirePermission('manage
         // Email will be sent in the background
         sendTempPasswordEmail(email, full_name || 'New User', generatedPassword).then(emailResult => {
             if (!emailResult.success) {
-                console.log(`[DEV MODE] Password for ${email}: ${generatedPassword}`);
+                console.warn(`[ADMIN] Failed to dispatch temporary password email to ${email}`);
             }
         }).catch(err => console.error('Background email error:', err));
         const profile = await query('SELECT * FROM user_profiles WHERE id = $1', [userId]);
@@ -284,13 +332,42 @@ router.get('/users/:id/permissions', authenticate, requirePermission('manage_rol
     }
 });
 import { logAuditEvent } from '../services/auditLogger.js';
+import { tierForRole } from '../utils/roleTier.js';
 // PUT /api/admin/users/:id/permissions
 router.put('/users/:id/permissions', authenticate, requirePermission('manage_roles'), async (req, res) => {
     try {
         const { role_id, permission_ids, individual_permissions, user_role } = req.body;
         const pids = permission_ids !== undefined ? permission_ids : individual_permissions;
+        const targetId = req.params.id;
+        const targetRes = await query('SELECT user_role, role_id, is_active FROM user_profiles WHERE id = $1', [targetId]);
+        if (targetRes.rows.length === 0) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+        const target = targetRes.rows[0];
+        if (targetId === BOOTSTRAP_SUPER_ADMIN_ID || target.user_role === 'super_admin') {
+            return res.status(403).json({ error: 'The super admin account\'s role and permissions cannot be changed' });
+        }
+        // Resolve and validate the requested role before touching anything
+        if (user_role !== undefined && typeof user_role !== 'string') {
+            return res.status(400).json({ error: 'Invalid role' });
+        }
+        if (role_id !== undefined && role_id !== null && !UUID_RE.test(String(role_id))) {
+            return res.status(400).json({ error: 'Invalid role_id: role does not exist in the system.' });
+        }
+        let roleIdName = null;
+        if (role_id) {
+            const r = await query('SELECT name FROM roles WHERE id = $1', [role_id]);
+            if (r.rows.length === 0) {
+                return res.status(400).json({ error: 'Invalid role_id: role does not exist in the system.' });
+            }
+            roleIdName = r.rows[0].name;
+        }
+        if (isSuperAdminRoleName(user_role) || isSuperAdminRoleName(roleIdName)) {
+            return res.status(403).json({ error: 'Super admin cannot be assigned' });
+        }
+        let resolvedRoleId = role_id || null;
+        let newTier = null;
         if (user_role !== undefined) {
-            let resolvedRoleId = role_id;
             if (!resolvedRoleId) {
                 const r = await query('SELECT id FROM roles WHERE LOWER(name) = $1', [user_role.toLowerCase()]);
                 if (r.rows.length === 0) {
@@ -298,34 +375,73 @@ router.put('/users/:id/permissions', authenticate, requirePermission('manage_rol
                 }
                 resolvedRoleId = r.rows[0].id;
             }
-            await query('UPDATE user_profiles SET user_role = $1, role_id = COALESCE($2, role_id) WHERE id = $3', [user_role, resolvedRoleId, req.params.id]);
+            newTier = tierForRole(user_role);
         }
-        else if (role_id !== undefined) {
-            await query('UPDATE user_profiles SET role_id = $1 WHERE id = $2', [role_id, req.params.id]);
+        else if (roleIdName !== null) {
+            newTier = tierForRole(roleIdName);
         }
+        const roleChanging = newTier !== null &&
+            (newTier !== target.user_role || (resolvedRoleId !== null && resolvedRoleId !== target.role_id));
+        if (roleChanging && targetId === req.user.id) {
+            return res.status(403).json({ error: 'You cannot change your own role' });
+        }
+        if (roleChanging && ['admin', 'super_admin'].includes(target.user_role) && target.is_active !== false &&
+            !['admin', 'super_admin'].includes(newTier)) {
+            const others = await query(`SELECT COUNT(*)::int AS n FROM user_profiles
+         WHERE user_role IN ('admin', 'super_admin') AND COALESCE(is_active, true) = true AND id <> $1`, [targetId]);
+            if ((others.rows[0]?.n || 0) === 0) {
+                return res.status(409).json({ error: 'This is the last active administrator and cannot be demoted' });
+            }
+        }
+        // Validate permission ids before deleting the existing grants
         if (pids !== undefined && Array.isArray(pids)) {
-            await query('DELETE FROM user_permissions WHERE user_id = $1', [req.params.id]);
-            // Calculate role inherited permissions
-            let targetRoleId = role_id;
-            if (!targetRoleId) {
-                const profRes = await query('SELECT role_id FROM user_profiles WHERE id = $1', [req.params.id]);
-                targetRoleId = profRes.rows[0]?.role_id;
+            if (pids.some((id) => typeof id !== 'string' || !UUID_RE.test(id))) {
+                return res.status(400).json({ error: 'Invalid permission id' });
             }
-            const rolePermsRes = await query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [targetRoleId]);
-            const rolePermIds = rolePermsRes.rows.map(r => r.permission_id);
-            // Determine explicit grants (checked but not inherited)
-            const grantedPerms = pids.filter(id => !rolePermIds.includes(id));
-            for (const pid of grantedPerms) {
-                await query('INSERT INTO user_permissions (user_id, permission_id, granted_by) VALUES ($1, $2, $3) ON CONFLICT DO NOTHING', [req.params.id, pid, req.user.id]);
+            const uniquePids = Array.from(new Set(pids.map((id) => id.toLowerCase())));
+            if (uniquePids.length > 0) {
+                const found = await query('SELECT COUNT(*)::int AS n FROM permissions WHERE id = ANY($1::uuid[])', [uniquePids]);
+                if ((found.rows[0]?.n || 0) !== uniquePids.length) {
+                    return res.status(400).json({ error: 'One or more permissions do not exist' });
+                }
             }
         }
+        await transaction(async (client) => {
+            if (user_role !== undefined) {
+                await client.query('UPDATE user_profiles SET user_role = $1, role_id = COALESCE($2, role_id) WHERE id = $3', [newTier, resolvedRoleId, targetId]);
+            }
+            else if (role_id !== undefined) {
+                await client.query("UPDATE user_profiles up SET role_id = r.id, user_role = CASE WHEN LOWER(r.name) IN ('super_admin','admin','lab_manager','researcher','student','guest','user') THEN LOWER(r.name) ELSE 'user' END FROM roles r WHERE r.id = $1 AND up.id = $2", [role_id, targetId]);
+            }
+            if (pids !== undefined && Array.isArray(pids)) {
+                await client.query('DELETE FROM user_permissions WHERE user_id = $1', [targetId]);
+                // Calculate role inherited permissions
+                let targetRoleId = role_id;
+                if (!targetRoleId) {
+                    const profRes = await client.query('SELECT role_id FROM user_profiles WHERE id = $1', [targetId]);
+                    targetRoleId = profRes.rows[0]?.role_id;
+                }
+                const rolePermsRes = await client.query('SELECT permission_id FROM role_permissions WHERE role_id = $1', [targetRoleId]);
+                const rolePermIds = rolePermsRes.rows.map(r => r.permission_id);
+                // Explicit grants (ticked but not inherited from the role) and revocations
+                // (inherited from the role but unticked for this user).
+                const grantedPerms = pids.filter((id) => !rolePermIds.includes(id));
+                const revokedPerms = rolePermIds.filter((id) => !pids.includes(id));
+                for (const pid of grantedPerms) {
+                    await client.query('INSERT INTO user_permissions (user_id, permission_id, granted_by, granted) VALUES ($1, $2, $3, true) ON CONFLICT DO NOTHING', [targetId, pid, req.user.id]);
+                }
+                for (const pid of revokedPerms) {
+                    await client.query('INSERT INTO user_permissions (user_id, permission_id, granted_by, granted) VALUES ($1, $2, $3, false) ON CONFLICT DO NOTHING', [targetId, pid, req.user.id]);
+                }
+            }
+        });
         await logAuditEvent({
             userId: req.user?.id,
             action: 'PERMISSION_CHANGE',
             entityType: 'user_permissions',
-            entityId: req.params.id,
+            entityId: targetId,
             newValue: { role_id, user_role, permission_ids: pids },
-            remarks: `Updated permissions and role for user ${req.params.id}`,
+            remarks: `Updated permissions and role for user ${targetId}`,
         });
         res.json({ message: 'Updated' });
     }
@@ -367,7 +483,6 @@ router.get('/purchase-requests', authenticate, requirePermission('view_procureme
     try {
         const role = req.user?.user_role?.toLowerCase();
         const isPrivileged = role === 'admin' || role === 'super_admin' || role === 'superadmin';
-        console.log('[DEBUG PROCUREMENT ROUTE] Hit!', { email: req.user?.email, role, isPrivileged });
         let sql = `
       SELECT pr.*,
         json_build_object(
@@ -394,19 +509,136 @@ router.get('/purchase-requests', authenticate, requirePermission('view_procureme
         res.status(500).json({ error: 'Internal Server Error' });
     }
 });
+// --- Status transition guards (match the transitions the UI offers) ---
+const PR_STATUS_FLOW = {
+    approved: ['ordered', 'in_transit', 'received'],
+    ordered: ['in_transit', 'received'],
+    in_transit: ['received'],
+    received: ['added_to_inventory'],
+};
+const PR_APPROVABLE = ['draft', 'submitted', 'rejected'];
+const PR_REJECTABLE = ['draft', 'submitted', 'approved'];
+const PR_PROCUREMENT_STAGES = ['approved', 'ordered', 'in_transit', 'received', 'added_to_inventory'];
+async function loadPurchaseRequest(id, res) {
+    if (!UUID_RE.test(id)) {
+        res.status(400).json({ error: 'Invalid purchase request id' });
+        return null;
+    }
+    const r = await query('SELECT * FROM purchase_requests WHERE id = $1', [id]);
+    if (r.rows.length === 0) {
+        res.status(404).json({ error: 'Purchase request not found' });
+        return null;
+    }
+    return r.rows[0];
+}
+async function loadLeaveRequest(id, res) {
+    if (!UUID_RE.test(id)) {
+        res.status(400).json({ error: 'Invalid leave request id' });
+        return null;
+    }
+    const r = await query('SELECT * FROM leave_requests WHERE id = $1', [id]);
+    if (r.rows.length === 0) {
+        res.status(404).json({ error: 'Leave request not found' });
+        return null;
+    }
+    return r.rows[0];
+}
+// Fields the requester filled in. The approving admin may correct any of them as part of approval.
+const PR_APPROVAL_EDITABLE = [
+    'item_name', 'category', 'quantity', 'purpose', 'estimated_cost', 'vendor_name', 'link',
+    'manufacturer_part_no', 'volume', 'duration_of_consumption', 'project_code',
+];
+const PR_FIELD_LABELS = {
+    item_name: 'item name', category: 'category', quantity: 'quantity', purpose: 'purpose',
+    estimated_cost: 'estimated cost', vendor_name: 'vendor', link: 'link',
+    manufacturer_part_no: 'part number', volume: 'volume', duration_of_consumption: 'duration of consumption',
+    project_code: 'project code',
+};
+/** Validates the admin's edits; returns the normalised changes or an error message. */
+function purchaseApprovalChanges(body, current) {
+    const changes = {};
+    for (const key of PR_APPROVAL_EDITABLE) {
+        if (body?.[key] === undefined)
+            continue;
+        let value = body[key];
+        if (typeof value === 'string')
+            value = value.trim();
+        if (key === 'quantity') {
+            const q = Number(value);
+            if (!Number.isInteger(q) || q <= 0)
+                return { error: 'Quantity must be a whole number greater than 0' };
+            value = q;
+        }
+        else if (key === 'estimated_cost') {
+            if (value === '' || value === null) {
+                value = null;
+            }
+            else {
+                const n = Number(value);
+                if (isNaN(n) || n < 0)
+                    return { error: 'Estimated cost cannot be negative' };
+                value = n;
+            }
+        }
+        else if (['item_name', 'category', 'purpose'].includes(key)) {
+            if (!value)
+                return { error: `${PR_FIELD_LABELS[key][0].toUpperCase()}${PR_FIELD_LABELS[key].slice(1)} cannot be empty` };
+        }
+        else if (value === '') {
+            value = null;
+        }
+        const before = current[key] === null || current[key] === undefined ? null : String(current[key]);
+        const after = value === null ? null : String(value);
+        const numeric = key === 'estimated_cost' || key === 'quantity';
+        const same = numeric && before !== null && after !== null ? Number(before) === Number(after) : before === after;
+        if (!same)
+            changes[key] = value;
+    }
+    const projectCode = changes.project_code !== undefined ? changes.project_code : current.project_code;
+    if (!projectCode || !String(projectCode).trim()) {
+        return { error: 'Project Code is required to approve this purchase request' };
+    }
+    return { changes };
+}
 router.put('/purchase-requests/:id/approve', authenticate, requirePermission('approve_procurement'), async (req, res) => {
     try {
+        const current = await loadPurchaseRequest(req.params.id, res);
+        if (!current)
+            return;
+        if (!PR_APPROVABLE.includes(current.status)) {
+            return res.status(400).json({ error: `A request that is '${current.status}' cannot be approved` });
+        }
+        const checked = purchaseApprovalChanges(req.body, current);
+        if ('error' in checked)
+            return res.status(400).json({ error: checked.error });
+        const { changes } = checked;
+        const editKeys = Object.keys(changes);
+        const params = [req.user.id, req.params.id, PR_APPROVABLE, ...editKeys.map(k => changes[k])];
+        const editSql = editKeys.map((k, i) => `, "${sanitizeIdentifier(k)}" = $${i + 4}`).join('');
+        // Conditional on status so concurrent approvals can't both succeed.
         const result = await query(`UPDATE purchase_requests
-       SET status = 'approved', approved_by = $1, approved_at = now(), rejection_reason = NULL
-       WHERE id = $2
-       RETURNING *`, [req.user.id, req.params.id]);
+       SET status = 'approved', approved_by = $1, approved_at = now(), rejection_reason = NULL${editSql}
+       WHERE id = $2 AND status = ANY($3::text[])
+       RETURNING *`, params);
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'This request was already decided' });
+        }
+        await logAuditEvent({
+            userId: req.user.id,
+            action: 'APPROVE',
+            entityType: 'purchase_requests',
+            entityId: req.params.id,
+            oldValue: current,
+            newValue: result.rows[0],
+        });
         if (result.rows[0]) {
             const pr = result.rows[0];
             await createNotification({
                 userId: pr.requested_by,
                 type: 'procurement',
                 title: 'Purchase Request Approved',
-                message: `Your purchase request for ${pr.item_name || 'an item'} has been approved.`,
+                message: `Your purchase request for ${pr.item_name || 'an item'} has been approved.` +
+                    (editKeys.length ? ` The approver updated: ${editKeys.map(k => PR_FIELD_LABELS[k]).join(', ')}.` : ''),
                 relatedEntityType: 'purchase_requests',
                 relatedEntityId: pr.id,
                 actionUrl: `/purchases`
@@ -421,10 +653,19 @@ router.put('/purchase-requests/:id/approve', authenticate, requirePermission('ap
 });
 router.put('/purchase-requests/:id/reject', authenticate, requirePermission('approve_procurement'), async (req, res) => {
     try {
+        const current = await loadPurchaseRequest(req.params.id, res);
+        if (!current)
+            return;
+        if (!PR_REJECTABLE.includes(current.status)) {
+            return res.status(400).json({ error: `A request that is '${current.status}' can no longer be rejected` });
+        }
         const result = await query(`UPDATE purchase_requests
        SET status = 'rejected', approved_by = $1, approved_at = now(), rejection_reason = $2
-       WHERE id = $3
-       RETURNING *`, [req.user.id, req.body.rejection_reason || null, req.params.id]);
+       WHERE id = $3 AND status = ANY($4::text[])
+       RETURNING *`, [req.user.id, req.body.rejection_reason || null, req.params.id, PR_REJECTABLE]);
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'This request was already decided' });
+        }
         if (result.rows[0]) {
             const pr = result.rows[0];
             await createNotification({
@@ -446,10 +687,25 @@ router.put('/purchase-requests/:id/reject', authenticate, requirePermission('app
 });
 router.put('/purchase-requests/:id/status', authenticate, requirePermission('approve_procurement'), async (req, res) => {
     try {
+        const current = await loadPurchaseRequest(req.params.id, res);
+        if (!current)
+            return;
+        const next = req.body?.status;
+        const allowed = PR_STATUS_FLOW[current.status] || [];
+        if (typeof next !== 'string' || !allowed.includes(next)) {
+            return res.status(400).json({
+                error: allowed.length
+                    ? `Status can move from '${current.status}' to: ${allowed.join(', ')}`
+                    : `No further status changes are possible from '${current.status}'`,
+            });
+        }
         const result = await query(`UPDATE purchase_requests
        SET status = $1, approved_by = $2, approved_at = CASE WHEN $1 = 'approved' THEN now() ELSE approved_at END
-       WHERE id = $3
-       RETURNING *`, [req.body.status, req.user.id, req.params.id]);
+       WHERE id = $3 AND status = $4
+       RETURNING *`, [req.body.status, req.user.id, req.params.id, current.status]);
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'This request was already updated by someone else. Refresh and try again.' });
+        }
         if (result.rows[0]) {
             const pr = result.rows[0];
             await createNotification({
@@ -481,6 +737,16 @@ router.get('/purchase-requests/:id/procurement', authenticate, requirePermission
 });
 router.post('/purchase-requests/:id/procurement', authenticate, requirePermission('manage_procurement'), async (req, res) => {
     try {
+        const current = await loadPurchaseRequest(req.params.id, res);
+        if (!current)
+            return;
+        if (!PR_PROCUREMENT_STAGES.includes(current.status)) {
+            return res.status(400).json({ error: 'Procurement details can only be recorded after the request is approved' });
+        }
+        if (req.body.approved_cost !== undefined && req.body.approved_cost !== null && req.body.approved_cost !== '' &&
+            (isNaN(Number(req.body.approved_cost)) || Number(req.body.approved_cost) < 0)) {
+            return res.status(400).json({ error: 'Approved cost must be a number of 0 or more' });
+        }
         const existing = await query('SELECT id FROM procurement_details WHERE purchase_request_id = $1 ORDER BY created_at DESC LIMIT 1', [req.params.id]);
         const fields = {
             approved_cost: req.body.approved_cost ?? null,
@@ -520,10 +786,19 @@ router.post('/purchase-requests/:id/procurement', authenticate, requirePermissio
 });
 router.put('/leave-requests/:id/approve', authenticate, requirePermission('approve_leaves'), async (req, res) => {
     try {
+        const current = await loadLeaveRequest(req.params.id, res);
+        if (!current)
+            return;
+        if (current.status !== 'pending') {
+            return res.status(400).json({ error: `This leave request is already ${current.status}` });
+        }
         const result = await query(`UPDATE leave_requests
        SET status = 'approved', approved_by = $1, approved_at = now(), admin_remarks = NULL
-       WHERE id = $2
+       WHERE id = $2 AND status = 'pending'
        RETURNING *`, [req.user.id, req.params.id]);
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'This request was already decided' });
+        }
         if (result.rows[0]) {
             const lr = result.rows[0];
             await createNotification({
@@ -545,10 +820,19 @@ router.put('/leave-requests/:id/approve', authenticate, requirePermission('appro
 });
 router.put('/leave-requests/:id/reject', authenticate, requirePermission('approve_leaves'), async (req, res) => {
     try {
+        const current = await loadLeaveRequest(req.params.id, res);
+        if (!current)
+            return;
+        if (current.status !== 'pending') {
+            return res.status(400).json({ error: `This leave request is already ${current.status}` });
+        }
         const result = await query(`UPDATE leave_requests
        SET status = 'rejected', approved_by = $1, approved_at = now(), admin_remarks = $2
-       WHERE id = $3
+       WHERE id = $3 AND status = 'pending'
        RETURNING *`, [req.user.id, req.body.admin_remarks || null, req.params.id]);
+        if (result.rows.length === 0) {
+            return res.status(409).json({ error: 'This request was already decided' });
+        }
         if (result.rows[0]) {
             const lr = result.rows[0];
             await createNotification({
@@ -585,9 +869,102 @@ router.get('/reports/:type', authenticate, requirePermission('view_reports'), as
                 break;
             case 'inventory':
                 result = await query(`
-          SELECT i.*, up.full_name as assigned_to_name
-          FROM inventory_items i LEFT JOIN user_profiles up ON up.id = i.assigned_to_user_id
-          ORDER BY i.item_name`);
+          SELECT i.*, f.name as facility_name, f.project_code as facility_project_code,
+                 up.full_name as assigned_to_name, up.email as assigned_to_email
+          FROM inventory_items i
+          LEFT JOIN facilities f ON f.id = i.facility_id
+          LEFT JOIN user_profiles up ON up.id = i.assigned_to_user_id
+          ORDER BY i.classification, i.item_name`);
+                break;
+            case 'inventory-requests':
+            case 'inventory-transactions':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.category, ii.classification, ii.asset_tag, ii.serial_number, ii.location,
+            ii.po_number, ii.vendor_name, ii.purchased_by,
+            f.name as facility_name,
+            req_u.full_name as requester_name, req_u.email as requester_email,
+            app_u.full_name as approver_name,
+            iss_u.full_name as issuer_name,
+            rec_u.full_name as receiver_name
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          LEFT JOIN facilities f ON f.id = ii.facility_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          LEFT JOIN user_profiles app_u ON app_u.id = ir.approved_by
+          LEFT JOIN user_profiles iss_u ON iss_u.id = ir.issued_by
+          LEFT JOIN user_profiles rec_u ON rec_u.id = ir.received_by
+          ORDER BY ir.created_at DESC`);
+                break;
+            case 'inventory-consumables':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.category, ii.classification, ii.quantity as current_stock, ii.location,
+            ii.po_number, ii.vendor_name,
+            req_u.full_name as requester_name,
+            iss_u.full_name as issuer_name
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          LEFT JOIN user_profiles iss_u ON iss_u.id = ir.issued_by
+          WHERE ii.classification = 'Consumables' OR ir.is_returnable = false
+          ORDER BY ir.issue_date DESC NULLS LAST, ir.created_at DESC`);
+                break;
+            case 'inventory-equipment':
+                result = await query(`
+          SELECT 
+            ii.*,
+            f.name as facility_name, f.project_code as facility_project_code,
+            up.full_name as assigned_to_name, up.email as assigned_to_email,
+            ir.id as active_request_id, ir.expected_return_date, ir.issue_date
+          FROM inventory_items ii
+          LEFT JOIN facilities f ON f.id = ii.facility_id
+          LEFT JOIN user_profiles up ON up.id = ii.assigned_to_user_id
+          LEFT JOIN inventory_requests ir ON ir.inventory_item_id = ii.id AND ir.status IN ('issued', 'overdue')
+          WHERE ii.classification = 'Equipment'
+          ORDER BY ii.item_name`);
+                break;
+            case 'inventory-returns':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.asset_tag, ii.serial_number, ii.classification,
+            req_u.full_name as requester_name,
+            rec_u.full_name as received_by_name
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          LEFT JOIN user_profiles rec_u ON rec_u.id = ir.received_by
+          WHERE ir.status = 'returned'
+          ORDER BY ir.actual_return_date DESC`);
+                break;
+            case 'inventory-overdue':
+                result = await query(`
+          SELECT 
+            ir.*,
+            ii.item_name, ii.asset_tag, ii.serial_number,
+            f.name as facility_name,
+            req_u.full_name as requester_name, req_u.email as requester_email
+          FROM inventory_requests ir
+          JOIN inventory_items ii ON ii.id = ir.inventory_item_id
+          LEFT JOIN facilities f ON f.id = ii.facility_id
+          JOIN user_profiles req_u ON req_u.id = ir.requested_by
+          WHERE ir.is_returnable = true AND (ir.status = 'overdue' OR (ir.status = 'issued' AND ir.expected_return_date < CURRENT_DATE))
+          ORDER BY ir.expected_return_date ASC`);
+                break;
+            case 'facility-equipment':
+                result = await query(`
+          SELECT 
+            f.id as facility_id, f.name as facility_name, f.location as facility_location,
+            f.project_code, f.funded_by,
+            ii.id as item_id, ii.item_name, ii.asset_tag, ii.serial_number, ii.classification, ii.status as item_status,
+            up.full_name as assigned_to_name
+          FROM facilities f
+          JOIN inventory_items ii ON ii.facility_id = f.id
+          LEFT JOIN user_profiles up ON up.id = ii.assigned_to_user_id
+          ORDER BY f.name, ii.item_name`);
                 break;
             case 'procurement':
                 result = await query(`
@@ -647,6 +1024,7 @@ router.get('/reports/:type', authenticate, requirePermission('view_reports'), as
 // --- Admin Work Overview ---
 router.get('/work/overview', authenticate, requirePermission('view_work'), async (req, res) => {
     try {
+        await syncOverdueMilestones();
         let sql = `
       SELECT
         aw.id AS work_id,
@@ -655,10 +1033,28 @@ router.get('/work/overview', authenticate, requirePermission('view_work'), async
         up.department,
         (SELECT completion_percentage FROM progress_updates
          WHERE work_id = aw.id ORDER BY update_date DESC, created_at DESC LIMIT 1) as completion_percentage,
-        (SELECT status FROM progress_updates
-         WHERE work_id = aw.id ORDER BY update_date DESC, created_at DESC LIMIT 1) as latest_status,
+        CASE
+          WHEN EXISTS (
+            SELECT 1 FROM work_milestones wm
+            WHERE wm.work_id = aw.id
+              AND wm.status = 'delayed'
+              AND (wm.justification_status IS NULL OR wm.justification_status != 'approved')
+          ) THEN 'delayed'
+          ELSE COALESCE(
+            (SELECT status FROM progress_updates WHERE work_id = aw.id ORDER BY update_date DESC, created_at DESC LIMIT 1),
+            'not_started'
+          )
+        END as latest_status,
+        (
+          SELECT COUNT(*)::int FROM work_milestones wm
+          WHERE wm.work_id = aw.id
+            AND wm.status = 'delayed'
+            AND (wm.justification_status IS NULL OR wm.justification_status != 'approved')
+        ) as unapproved_delayed_milestones_count,
         (SELECT COUNT(*) FROM work_problems
          WHERE work_id = aw.id AND status IN ('open','in_progress'))::int as open_problems_count,
+        (SELECT COUNT(*)::int FROM milestone_change_requests WHERE work_id = aw.id AND status = 'pending') AS pending_milestone_requests_count,
+        (SELECT COUNT(*)::int FROM work_dependencies wd JOIN assigned_works dep ON dep.id = wd.depends_on_work_id WHERE wd.work_id = aw.id AND dep.priority = 'code_red' AND dep.admin_status NOT IN ('completed', 'approved')) AS blocked_by_code_red_count,
         (SELECT MAX(created_at) FROM progress_updates WHERE work_id = aw.id) as last_updated
       FROM assigned_works aw
       LEFT JOIN user_profiles up ON up.id = aw.user_id`;
@@ -683,12 +1079,17 @@ router.get('/work/overview', authenticate, requirePermission('view_work'), async
                 ...row,
                 days_since_update: daysSinceUpdate,
                 completion_percentage: Number(row.completion_percentage || 0),
+                pending_milestone_requests_count: Number(row.pending_milestone_requests_count || 0),
+                blocked_by_code_red_count: Number(row.blocked_by_code_red_count || 0),
+                unapproved_delayed_milestones_count: Number(row.unapproved_delayed_milestones_count || 0),
             };
         });
         const usersResult = await query('SELECT id, full_name, department FROM user_profiles ORDER BY full_name');
         const usersWithWork = new Set(workData.map((row) => row.user_id));
         const usersWithoutWork = usersResult.rows.filter((user) => !usersWithWork.has(user.id));
-        const myWorkRows = workData.filter((row) => row.user_id === req.user.id);
+        const myProfile = await query('SELECT full_name FROM user_profiles WHERE id = $1', [req.user.id]);
+        const myFullName = myProfile.rows[0]?.full_name;
+        const myWorkRows = workData.filter((row) => row.user_id === req.user.id || (myFullName && row.assigned_by === myFullName));
         const myWorkSummary = {
             totalWorks: myWorkRows.length,
             avgCompletion: myWorkRows.length
@@ -721,17 +1122,42 @@ router.get('/work/overview', authenticate, requirePermission('view_work'), async
                 openSupportRequests[row.support_required_from] = row.count;
             }
         }
+        // Pending milestone change requests for admin review
+        const pendingMilestoneRequestsResult = await query(`SELECT mcr.*,
+              aw.work_title,
+              aw.issue_key,
+              aw.project_name,
+              up.full_name as requester_name,
+              up.email as requester_email,
+              up.department as requester_department
+       FROM milestone_change_requests mcr
+       JOIN assigned_works aw ON aw.id = mcr.work_id
+       JOIN user_profiles up ON up.id = mcr.requested_by
+       WHERE mcr.status = 'pending'
+       ORDER BY mcr.created_at ASC`);
+        // Active Code-Red works
+        const activeCodeRedResult = await query(`SELECT aw.id, aw.issue_key, aw.work_title, aw.priority, aw.issue_type,
+              aw.code_red_activated_at, aw.start_date, aw.end_date, aw.admin_status,
+              up.full_name as user_name, up.email as user_email
+       FROM assigned_works aw
+       JOIN user_profiles up ON up.id = aw.user_id
+       WHERE aw.priority = 'code_red' AND aw.admin_status NOT IN ('completed', 'approved')
+       ORDER BY aw.code_red_activated_at DESC`);
         res.json({
             workData,
             usersWithoutWork,
             myWorkSummary,
+            pendingMilestoneRequests: pendingMilestoneRequestsResult.rows,
+            activeCodeRedWorks: activeCodeRedResult.rows,
             statistics: {
                 totalUsers: usersResult.rows.length,
                 usersWithWork: usersWithWork.size,
                 usersWithoutWork: usersWithoutWork.length,
-                delayedWorkCount: workData.filter((row) => row.latest_status === 'delayed').length,
+                delayedWorkCount: workData.filter((row) => row.latest_status === 'delayed' || Number(row.unapproved_delayed_milestones_count || 0) > 0).length,
                 highImpactProblemsCount: highImpactProblemsResult.rows[0]?.count || 0,
                 openSupportRequests,
+                codeRedCount: activeCodeRedResult.rows.length,
+                pendingMilestoneRequestsCount: pendingMilestoneRequestsResult.rows.length,
             },
         });
     }
@@ -765,18 +1191,8 @@ router.post('/work/:id/comments', authenticate, requirePermission('create_work')
         const result = await query(`INSERT INTO admin_comments (work_id, comment, commented_by)
        VALUES ($1,$2,$3)
        RETURNING *`, [req.params.id, comment, req.user.id]);
-        const workResult = await query('SELECT user_id, project_name FROM assigned_works WHERE id = $1', [req.params.id]);
-        if (workResult.rows[0] && workResult.rows[0].user_id !== req.user.id) {
-            await createNotification({
-                userId: workResult.rows[0].user_id,
-                type: 'work',
-                title: 'New Comment on Your Work',
-                message: `An admin commented on your work: ${workResult.rows[0].project_name}`,
-                relatedEntityType: 'assigned_works',
-                relatedEntityId: req.params.id,
-                actionUrl: `/work-overview`
-            });
-        }
+        // Send notifications to assignee, supervisor, and admins
+        await notifyWorkComment(req.params.id, req.user.id, comment);
         res.status(201).json(result.rows[0]);
     }
     catch (err) {

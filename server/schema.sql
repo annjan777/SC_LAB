@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   email text NOT NULL UNIQUE,
   password_hash text NOT NULL,
+  reset_password_token text,
+  reset_password_expires timestamptz,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -95,6 +97,7 @@ CREATE TABLE IF NOT EXISTS user_permissions (
   permission_id uuid NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
   granted_by uuid REFERENCES users(id),
   granted_at timestamptz DEFAULT now(),
+  granted boolean NOT NULL DEFAULT true, -- false = revoke a permission the user's role would give
   UNIQUE(user_id, permission_id)
 );
 
@@ -173,33 +176,108 @@ CREATE TABLE IF NOT EXISTS user_processes (
 );
 
 ------------------------------------------------------------
--- 5. INVENTORY
+-- 5. FACILITIES
+------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS facilities (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name text NOT NULL,
+  description text,
+  location text NOT NULL,
+  status text DEFAULT 'operational' CHECK (status IN ('operational','under_maintenance','out_of_order','decommissioned')),
+  responsible_person_id uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  assigned_to_user_id uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  image_url text,
+  category text,
+  model_number text,
+  make_model text,
+  manufacturer text,
+  serial_number text,
+  asset_tag text,
+  warranty_end_date date,
+  installation_date date,
+  last_maintenance_date date,
+  next_maintenance_date date,
+  user_manual_url text,
+  vendor_name text,
+  vendor_contact text,
+  specifications jsonb DEFAULT '{}',
+  usage_guidelines text,
+  safety_requirements text,
+  booking_required boolean DEFAULT false,
+  max_booking_hours integer DEFAULT 4,
+  capacity integer DEFAULT NULL,
+  features text[] DEFAULT '{}',
+  project_code text,
+  funded_by text,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS facility_bookings (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  facility_id uuid NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  purpose text,
+  start_time timestamptz NOT NULL,
+  end_time timestamptz NOT NULL,
+  status text NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'cancelled', 'completed')),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT valid_facility_booking_time CHECK (end_time > start_time)
+);
+
+------------------------------------------------------------
+-- 6. INVENTORY
 ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS inventory_items (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   item_name text NOT NULL,
-  category text NOT NULL CHECK (
-    lower(category) IN (
-      'equipment',
-      'consumable',
-      'chemicals',
-      'electronics',
-      'appliances',
-      'computer peripherals',
-      'equipments',
-      'consumables',
-      'others'
-    )
-  ),
+  category text NOT NULL,
   serial_number text,
   asset_tag text,
   quantity integer DEFAULT 1,
-  location text,
+  location text NOT NULL DEFAULT 'Main Lab',
   condition text DEFAULT 'good' CHECK (condition IN ('new','good','fair','poor','damaged')),
   assigned_to_user_id uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  facility_id uuid REFERENCES facilities(id) ON DELETE SET NULL,
+  po_number text,
+  vendor_name text,
+  purchased_by text,
+  expiry_date date,
+  classification text DEFAULT 'Equipment' CHECK (classification IN ('Equipment', 'Consumables')),
+  status text DEFAULT 'available' CHECK (status IN ('available', 'assigned', 'in_use', 'maintenance', 'retired')),
+  is_returnable boolean DEFAULT false,
+  expected_return_date date,
   warranty_end_date date,
   last_maintenance_date date,
   purchase_request_id uuid,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS inventory_requests (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  inventory_item_id uuid NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  requested_by uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  quantity integer NOT NULL DEFAULT 1 CHECK (quantity > 0),
+  purpose text,
+  request_date timestamptz NOT NULL DEFAULT now(),
+  status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'issued', 'returned', 'overdue', 'cancelled')),
+  approved_by uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  approved_at timestamptz,
+  rejection_reason text,
+  issued_by uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  issue_date timestamptz,
+  is_returnable boolean NOT NULL DEFAULT false,
+  expected_return_date date,
+  actual_return_date timestamptz,
+  returned_condition text CHECK (returned_condition IS NULL OR returned_condition IN ('new', 'good', 'fair', 'poor', 'damaged')),
+  return_remarks text,
+  received_by uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  remarks text,
+  last_borrower_reminder_sent_date date,
+  last_assigner_reminder_sent_date date,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -284,29 +362,30 @@ CREATE TABLE IF NOT EXISTS leave_requests (
 );
 
 ------------------------------------------------------------
--- 8. FACILITIES
+-- 8. FACILITY EQUIPMENT & EQUIPMENT BOOKINGS
 ------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS facilities (
+CREATE TABLE IF NOT EXISTS facility_equipment (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  name text NOT NULL,
-  description text,
-  location text,
-  status text DEFAULT 'operational' CHECK (status IN ('operational','under_maintenance','out_of_order','decommissioned')),
-  responsible_person_id uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
-  image_url text,
-  category text,
-  model_number text,
-  manufacturer text,
-  installation_date date,
-  last_maintenance_date date,
-  next_maintenance_date date,
-  specifications jsonb DEFAULT '{}',
-  usage_guidelines text,
-  safety_requirements text,
-  booking_required boolean DEFAULT false,
-  max_booking_hours integer DEFAULT 4,
+  facility_id uuid NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+  inventory_item_id uuid NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
   created_at timestamptz DEFAULT now(),
-  updated_at timestamptz DEFAULT now()
+  UNIQUE(facility_id, inventory_item_id)
+);
+
+CREATE TABLE IF NOT EXISTS equipment_bookings (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  inventory_item_id uuid NOT NULL REFERENCES inventory_items(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  purpose text,
+  quantity integer DEFAULT 1,
+  notes text,
+  start_time timestamptz NOT NULL,
+  end_time timestamptz NOT NULL,
+  status text NOT NULL DEFAULT 'confirmed' CHECK (status IN ('confirmed', 'cancelled', 'completed')),
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  CONSTRAINT valid_equipment_booking_time CHECK (end_time > start_time)
 );
 
 ------------------------------------------------------------
@@ -325,19 +404,25 @@ CREATE TABLE IF NOT EXISTS work_cycles (
   UNIQUE(quarter, year)
 );
 
+CREATE SEQUENCE IF NOT EXISTS work_issue_key_seq START 1;
+
 CREATE TABLE IF NOT EXISTS assigned_works (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  issue_key text UNIQUE DEFAULT ('SCLAB-' || nextval('work_issue_key_seq')),
+  issue_type text DEFAULT 'task',
   cycle_id uuid REFERENCES work_cycles(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  assigned_by_user_id uuid REFERENCES users(id) ON DELETE SET NULL,
   project_name text NOT NULL,
   assigned_by text NOT NULL,
   work_title text NOT NULL,
   description text,
   start_date date,
   end_date date,
-  priority text DEFAULT 'medium' CHECK (priority IN ('low','medium','high')),
+  priority text DEFAULT 'medium' CHECK (priority IN ('low','medium','high','code_red')),
   admin_status text DEFAULT 'pending' CHECK (admin_status IN ('pending','on_track','needs_attention','completed','approved','rejected','needs_revision')),
   admin_feedback text,
+  code_red_activated_at timestamptz,
   procurement_request_ids uuid[] DEFAULT '{}',
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
@@ -350,6 +435,13 @@ CREATE TABLE IF NOT EXISTS work_milestones (
   target_date date,
   expected_outcome text,
   status text DEFAULT 'pending' CHECK (status IN ('pending','in_progress','completed','delayed')),
+  justification text,
+  justification_linked_work_id uuid REFERENCES assigned_works(id) ON DELETE SET NULL,
+  justification_status text DEFAULT NULL CHECK (justification_status IN ('pending', 'approved', 'rejected')),
+  justification_submitted_at timestamptz DEFAULT NULL,
+  justification_reviewed_by uuid REFERENCES user_profiles(id) DEFAULT NULL,
+  justification_reviewed_at timestamptz DEFAULT NULL,
+  justification_review_notes text DEFAULT NULL,
   created_at timestamptz DEFAULT now(),
   updated_at timestamptz DEFAULT now()
 );
@@ -402,8 +494,25 @@ CREATE TABLE IF NOT EXISTS work_dependencies (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   work_id uuid NOT NULL REFERENCES assigned_works(id) ON DELETE CASCADE,
   depends_on_work_id uuid NOT NULL REFERENCES assigned_works(id) ON DELETE CASCADE,
+  dependency_type text DEFAULT 'blocks' CHECK (dependency_type IN ('blocks', 'is_blocked_by', 'relates_to', 'delayed_by_code_red')),
+  notes text,
   created_at timestamptz DEFAULT now(),
   UNIQUE(work_id, depends_on_work_id)
+);
+
+CREATE TABLE IF NOT EXISTS milestone_change_requests (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  work_id uuid NOT NULL REFERENCES assigned_works(id) ON DELETE CASCADE,
+  requested_by uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  reason text NOT NULL,
+  status text DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')),
+  proposed_milestones jsonb NOT NULL,
+  previous_milestones jsonb DEFAULT '[]'::jsonb,
+  admin_notes text,
+  reviewed_by uuid REFERENCES user_profiles(id),
+  reviewed_at timestamptz,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
 );
 
 ------------------------------------------------------------
@@ -430,7 +539,8 @@ CREATE TABLE IF NOT EXISTS notifications (
 CREATE TABLE IF NOT EXISTS repository_documents (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
   filename text NOT NULL,
-  file_path text NOT NULL,
+  file_path text,
+  document_url text,
   file_type text,
   category text NOT NULL DEFAULT 'other_documents',
   title text NOT NULL,
@@ -529,14 +639,20 @@ BEGIN
   SELECT p.name
   FROM user_permissions up
   JOIN permissions p ON p.id = up.permission_id
-  WHERE up.user_id = user_uuid
+  WHERE up.user_id = user_uuid AND up.granted = true
   UNION
   -- Role-based permissions
   SELECT p.name
   FROM user_profiles prof
   JOIN role_permissions rp ON rp.role_id = prof.role_id
   JOIN permissions p ON p.id = rp.permission_id
-  WHERE prof.id = user_uuid;
+  WHERE prof.id = user_uuid
+  EXCEPT
+  -- Per-user revocations
+  SELECT p.name
+  FROM user_permissions up
+  JOIN permissions p ON p.id = up.permission_id
+  WHERE up.user_id = user_uuid AND up.granted = false;
 END;
 $$ LANGUAGE plpgsql;
 
@@ -628,7 +744,12 @@ INSERT INTO permissions (name, display_name, description, category) VALUES
   ('view_repository', 'View Repository', 'Can view repository documents', 'repository'),
   ('edit_repository_all', 'Edit Repository', 'Can edit all repository documents', 'repository'),
   ('delete_repository_all', 'Delete Repository', 'Can delete all repository documents', 'repository'),
-  ('share_repository_documents', 'Share Repository Documents', 'Can share repository documents with users', 'repository')
+  ('share_repository_documents', 'Share Repository Documents', 'Can share repository documents with users', 'repository'),
+  ('view_projects', 'View Projects', 'Can view project tracker entries', 'projects'),
+  ('create_projects', 'Create Projects', 'Can create new projects in tracker', 'projects'),
+  ('edit_projects', 'Edit Projects', 'Can edit project tracker entries', 'projects'),
+  ('delete_projects', 'Delete Projects', 'Can delete project tracker entries', 'projects'),
+  ('add_project_achievement', 'Add Project Achievements', 'Can post achievement updates to projects', 'projects')
 ON CONFLICT (name) DO NOTHING;
 
 -- Default admin role
@@ -649,7 +770,7 @@ WHERE LOWER(r.name) = 'user'
   AND p.name IN (
     'create_leave_request', 
     'create_purchase_request', 
-    'create_work', 'edit_work', 'view_work', 
+    'create_work', 'view_work', 
     'view_inventory', 'create_inventory', 'edit_inventory', 
     'view_settings', 
     'view_notifications', 'view_facilities'
@@ -672,4 +793,85 @@ CREATE TRIGGER trigger_sync_user_profile_email
   AFTER INSERT OR UPDATE OF email ON user_profiles
   FOR EACH ROW
   EXECUTE FUNCTION sync_user_profile_email_to_users();
+
+------------------------------------------------------------
+-- DAILY TO-DO TRACKERS & ITEMS (User-Specific & Private)
+------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS daily_todo_trackers (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  date date NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now(),
+  UNIQUE(user_id, date)
+);
+CREATE INDEX IF NOT EXISTS idx_daily_todo_trackers_user_date ON daily_todo_trackers(user_id, date);
+
+CREATE TABLE IF NOT EXISTS daily_todo_items (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tracker_id uuid NOT NULL REFERENCES daily_todo_trackers(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
+  title text NOT NULL,
+  is_completed boolean NOT NULL DEFAULT false,
+  completed_at timestamptz,
+  order_index integer NOT NULL DEFAULT 0,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_daily_todo_items_tracker_order ON daily_todo_items(tracker_id, order_index);
+CREATE INDEX IF NOT EXISTS idx_daily_todo_items_user ON daily_todo_items(user_id);
+
+------------------------------------------------------------
+-- PROJECT TRACKER MODULE
+------------------------------------------------------------
+CREATE SEQUENCE IF NOT EXISTS project_tracker_seq START WITH 1;
+
+CREATE TABLE IF NOT EXISTS projects (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  tracker_id varchar(50) UNIQUE NOT NULL,
+  project_code varchar(100),
+  project_title varchar(255) NOT NULL,
+  funding_agency varchar(255),
+  proposal_link text,
+  proposal_filename text,
+  proposal_file_path text,
+  proposal_file_size integer,
+  proposal_file_type text,
+  category varchar(100),
+  status varchar(50) DEFAULT 'Active',
+  overview text,
+  plan_next_phase text,
+  start_date date,
+  closing_date date,
+  faculty_lead_pi varchar(255),
+  team jsonb DEFAULT '[]'::jsonb,
+  accountable_owner_poc varchar(255),
+  rag_status varchar(20) DEFAULT 'Green',
+  last_funder_review text,
+  data_gaps_flags text,
+  last_weekly_update date,
+  update_status varchar(50) DEFAULT 'On Track',
+  open_actions integer DEFAULT 0,
+  overdue_actions integer DEFAULT 0,
+  staff_on_payroll varchar(100) DEFAULT '0',
+  created_by uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_projects_status ON projects(status);
+CREATE INDEX IF NOT EXISTS idx_projects_rag ON projects(rag_status);
+CREATE INDEX IF NOT EXISTS idx_projects_closing_date ON projects(closing_date);
+
+CREATE TABLE IF NOT EXISTS project_achievements (
+  id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
+  project_id uuid NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  user_id uuid REFERENCES user_profiles(id) ON DELETE SET NULL,
+  author_name varchar(255) NOT NULL,
+  message text NOT NULL,
+  created_at timestamptz DEFAULT now(),
+  updated_at timestamptz DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_achievements_project_id ON project_achievements(project_id, created_at DESC);
 

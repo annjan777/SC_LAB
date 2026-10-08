@@ -18,3 +18,7 @@ npm-debug.log*
 
 # Backups
 server/backups/*.zip
+server/backups/*.sql
+
+# Uploaded user files (documents, proposals, facility images)
+server/uploads/

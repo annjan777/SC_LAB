@@ -126,6 +126,56 @@ export const fetchNotificationsReportData = async (dateRange?: DateRange) => {
   return data || [];
 };
 
+export const fetchInventoryRequestsReportData = async (dateRange?: DateRange) => {
+  const params: Record<string, string> = {};
+  if (dateRange) {
+    params.from = dateRange.from;
+    params.to = dateRange.to;
+  }
+  const { data, error } = await api.get('/api/admin/reports/inventory-requests', params);
+  if (error) throw error;
+  return data || [];
+};
+
+export const fetchInventoryConsumablesReportData = async (dateRange?: DateRange) => {
+  const params: Record<string, string> = {};
+  if (dateRange) {
+    params.from = dateRange.from;
+    params.to = dateRange.to;
+  }
+  const { data, error } = await api.get('/api/admin/reports/inventory-consumables', params);
+  if (error) throw error;
+  return data || [];
+};
+
+export const fetchInventoryEquipmentReportData = async (dateRange?: DateRange) => {
+  const params: Record<string, string> = {};
+  if (dateRange) {
+    params.from = dateRange.from;
+    params.to = dateRange.to;
+  }
+  const { data, error } = await api.get('/api/admin/reports/inventory-equipment', params);
+  if (error) throw error;
+  return data || [];
+};
+
+export const fetchInventoryReturnsReportData = async (dateRange?: DateRange) => {
+  const params: Record<string, string> = {};
+  if (dateRange) {
+    params.from = dateRange.from;
+    params.to = dateRange.to;
+  }
+  const { data, error } = await api.get('/api/admin/reports/inventory-returns', params);
+  if (error) throw error;
+  return data || [];
+};
+
+export const fetchFacilityEquipmentReportData = async () => {
+  const { data, error } = await api.get('/api/admin/reports/facility-equipment');
+  if (error) throw error;
+  return data || [];
+};
+
 export const calculateInventoryStats = (items: any[]) => {
   const totalItems = items.length;
   const totalQuantity = items.reduce((sum, item) => sum + (item.quantity || 0), 0);

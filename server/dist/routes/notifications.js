@@ -4,11 +4,13 @@ import { authenticate } from '../middleware/auth.js';
 import { sanitizeIdentifier } from '../utils/sqlSanitizer.js';
 import { sendBroadcastEmails } from '../utils/email.js';
 const router = Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // GET /api/notifications
 router.get('/', authenticate, async (req, res) => {
     try {
         const archived = req.query.is_archived === 'true';
-        const limit = parseInt(req.query.limit) || 20;
+        const parsedLimit = parseInt(req.query.limit, 10);
+        const limit = Number.isFinite(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 100) : 20;
         const result = await query(`SELECT * FROM notifications WHERE user_id = $1 AND is_archived = $2
        ORDER BY created_at DESC LIMIT $3`, [req.user.id, archived, limit]);
         res.json(result.rows);
@@ -25,6 +27,12 @@ router.post('/', authenticate, async (req, res) => {
         // Only allow admins or people with specific permissions to create notifications for others
         if (user_id && user_id !== req.user.id && !req.user.permissions.has('manage_settings')) {
             return res.status(403).json({ error: 'Insufficient permissions' });
+        }
+        if (action_url && !/^\/(?!\/)/.test(String(action_url)) && !/^https?:\/\//i.test(String(action_url))) {
+            return res.status(400).json({ error: 'action_url must be an in-app path (/...) or an http(s) link' });
+        }
+        if (!title || !String(title).trim()) {
+            return res.status(400).json({ error: 'Notification title is required' });
         }
         const targetUserId = user_id || req.user.id;
         const result = await query(`INSERT INTO notifications (user_id, type, title, message, related_entity_type, related_entity_id, action_url)
@@ -46,7 +54,7 @@ router.post('/broadcast', authenticate, async (req, res) => {
             req.user.user_role !== 'super_admin') {
             return res.status(403).json({ error: 'Insufficient permissions to broadcast' });
         }
-        if (!title?.trim() || !message?.trim()) {
+        if (typeof title !== 'string' || typeof message !== 'string' || !title.trim() || !message.trim()) {
             return res.status(400).json({ error: 'Title and message are required' });
         }
         // 1. Fetch sender admin full name
@@ -98,16 +106,34 @@ router.post('/broadcast', authenticate, async (req, res) => {
 // PUT /api/notifications/:id
 router.put('/:id', authenticate, async (req, res) => {
     try {
-        const fields = req.body;
+        // Only the read/archive state of your own notification can change (never its owner, title or text).
+        if (!UUID_RE.test(req.params.id))
+            return res.status(404).json({ error: 'Notification not found' });
+        const ALLOWED = ['is_read', 'is_archived', 'read_at'];
+        const fields = {};
+        for (const k of ALLOWED)
+            if (req.body?.[k] !== undefined)
+                fields[k] = req.body[k];
+        for (const k of ['is_read', 'is_archived']) {
+            if (fields[k] !== undefined && typeof fields[k] !== 'boolean') {
+                return res.status(400).json({ error: `${k} must be a boolean` });
+            }
+        }
+        if (fields.read_at !== undefined && fields.read_at !== null &&
+            (typeof fields.read_at !== 'string' || Number.isNaN(Date.parse(fields.read_at)))) {
+            return res.status(400).json({ error: 'read_at must be a valid timestamp or null' });
+        }
         const rawKeys = Object.keys(fields);
         if (rawKeys.length === 0)
-            return res.status(400).json({ error: 'No fields to update' });
+            return res.status(400).json({ error: 'Only is_read / is_archived can be updated' });
         const safeKeys = rawKeys.map(k => sanitizeIdentifier(k));
         const setClause = safeKeys.map((k, i) => `"${k}" = $${i + 1}`).join(', ');
         const values = rawKeys.map(k => fields[k]);
         values.push(req.params.id);
         values.push(req.user.id);
         const result = await query(`UPDATE notifications SET ${setClause} WHERE id = $${values.length - 1} AND user_id = $${values.length} RETURNING *`, values);
+        if (result.rows.length === 0)
+            return res.status(404).json({ error: 'Notification not found' });
         res.json(result.rows[0]);
     }
     catch (err) {

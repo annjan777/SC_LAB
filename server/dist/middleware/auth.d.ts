@@ -18,5 +18,5 @@ export declare function generatePasswordResetToken(userId: string, email: string
 export declare function generateRefreshToken(userId: string): string;
 export declare function authenticate(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
 export declare function optionalAuthenticate(req: Request, _res: Response, next: NextFunction): Promise<void>;
-export declare function authenticateResetToken(req: Request, res: Response, next: NextFunction): Promise<Response<any, Record<string, any>> | undefined>;
-export declare function requirePermission(...perms: string[]): (req: Request, res: Response, next: NextFunction) => Response<any, Record<string, any>> | undefined;
+export declare function authenticateResetToken(req: Request, res: Response, next: NextFunction): Promise<void | Response<any, Record<string, any>>>;
+export declare function requirePermission(...perms: string[]): (req: Request, res: Response, next: NextFunction) => void | Response<any, Record<string, any>>;

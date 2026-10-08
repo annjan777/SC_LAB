@@ -2,6 +2,9 @@ import { query } from '../config/database.js';
 import { createNotification } from './notificationService.js';
 import { sendSkillReminderEmail } from '../utils/email.js';
 
+// Admins and the super admin run the portal; they get no skill emails, notifications or pop-ups.
+const SKILL_REMINDER_EXEMPT_ROLES = ['admin', 'super_admin', 'superadmin'];
+
 export interface UserSkillStatus {
   hasSkills: boolean;
   skillCount: number;
@@ -16,6 +19,11 @@ export interface UserSkillStatus {
  */
 export async function checkUserNeedsSkillReminder(userId: string): Promise<UserSkillStatus> {
   try {
+    const roleRes = await query('SELECT user_role FROM user_profiles WHERE id = $1', [userId]);
+    if (SKILL_REMINDER_EXEMPT_ROLES.includes(String(roleRes.rows[0]?.user_role || '').toLowerCase())) {
+      return { hasSkills: false, skillCount: 0, showPopup: false, lastReminderAt: null, lastDismissedAt: null };
+    }
+
     const skillCountRes = await query(
       'SELECT COUNT(*)::int AS count FROM user_skills WHERE user_id = $1',
       [userId]
@@ -117,10 +125,11 @@ export async function checkAndTriggerSkillReminders(options: { force?: boolean }
       FROM users u
       JOIN user_profiles up ON u.id = up.id
       WHERE up.is_active = true
+        AND LOWER(COALESCE(up.user_role, '')) <> ALL($1::text[])
         AND NOT EXISTS (
           SELECT 1 FROM user_skills us WHERE us.user_id = u.id
         )
-    `);
+    `, [SKILL_REMINDER_EXEMPT_ROLES]);
 
     const usersWithoutSkills = usersWithoutSkillsRes.rows;
     console.log(`[SKILL REMINDER] Found ${usersWithoutSkills.length} active users with 0 skills.`);

@@ -385,7 +385,7 @@ export default function UserDetailsModal({
               <button
                 type="button"
                 onClick={handleCancelEdit}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 text-gray-700 hover:bg-gray-200 rounded-lg text-xs font-semibold transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-gray-100 dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-300 dark:border-slate-700 rounded-lg text-xs font-semibold transition"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>Cancel</span>
@@ -1077,7 +1077,7 @@ export default function UserDetailsModal({
                   type="button"
                   onClick={handleCancelEdit}
                   disabled={saving}
-                  className="px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-200 rounded-lg transition"
+                  className="px-4 py-2 text-xs font-medium text-gray-700 dark:text-slate-200 bg-gray-100 dark:bg-slate-800 hover:bg-gray-200 dark:hover:bg-slate-700 border border-gray-300 dark:border-slate-700 rounded-lg transition"
                 >
                   Cancel
                 </button>
@@ -1117,7 +1117,7 @@ export default function UserDetailsModal({
               </button>
               <button
                 onClick={onClose}
-                className="px-6 py-2 bg-gray-200 text-gray-700 text-xs font-medium rounded-lg hover:bg-gray-300 transition"
+                className="px-6 py-2 bg-gray-200 dark:bg-slate-800 text-gray-700 dark:text-slate-200 border border-gray-300 dark:border-slate-700 text-xs font-medium rounded-lg hover:bg-gray-300 dark:hover:bg-slate-700 transition"
               >
                 Close
               </button>

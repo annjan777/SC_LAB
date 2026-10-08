@@ -1,9 +1,17 @@
 import { Request, Response, NextFunction } from 'express';
 import { evaluateRbacPolicy } from './rbacEvaluator.js';
 
+// Public authentication endpoints must work whatever token the browser still holds
+// (e.g. a second person signing in on a shared lab PC while the previous session is still stored).
+const PUBLIC_AUTH_PATHS = new Set(['/api/auth/login', '/api/auth/forgot-password', '/api/auth/verify-reset-token']);
+
 export function enforceRbac(req: Request, res: Response, next: NextFunction) {
   // Allow public static assets or health checks if needed
   if (req.path.startsWith('/uploads') || req.path === '/health') {
+    return next();
+  }
+  const fullPath = (req.baseUrl + req.path).replace(/\/+$/, '');
+  if (PUBLIC_AUTH_PATHS.has(fullPath)) {
     return next();
   }
 

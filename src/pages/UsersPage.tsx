@@ -3,6 +3,19 @@ import { api } from '../lib/api';
 import { Search, Users, Eye, ChevronUp, ChevronDown } from 'lucide-react';
 import UserDetailsModal from '../components/UserDetailsModal';
 import AdvancedSearchFilters, { SearchFilters } from '../components/AdvancedSearchFilters';
+import {
+  PageHeader,
+  Select,
+  TableContainer,
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  StatusBadge,
+  EmptyState,
+} from '../components/ui';
 
 interface UserProfile {
   id: string;
@@ -260,37 +273,33 @@ export default function UsersPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Lab Members</h1>
-        <p className="text-gray-600 mt-2">View lab member profiles and expertise</p>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader title="Lab Members" />
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 mb-6">
+      <div className="bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-gray-200 dark:border-slate-800 p-5 sm:p-6 transition-colors">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
           <div className="md:col-span-2">
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 dark:text-slate-500 w-5 h-5" />
               <input
                 type="text"
                 placeholder="Search by name, roll number, employee ID, email, phone..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full h-10 pl-10 pr-4 bg-white dark:bg-slate-800 border border-gray-300 dark:border-slate-700 text-gray-900 dark:text-slate-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm placeholder-gray-400 dark:placeholder-slate-500 transition"
               />
             </div>
           </div>
 
           <div>
-            <select
+            <Select
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
-              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="all">All Roles</option>
               <option value="admin">Admin</option>
               <option value="user">User</option>
-            </select>
+            </Select>
           </div>
         </div>
 
@@ -300,133 +309,119 @@ export default function UsersPage() {
           defaultExpanded={true}
         />
 
-        <div className="flex items-center space-x-4 text-sm text-gray-600 mt-4">
+        <div className="flex items-center space-x-4 text-xs text-gray-500 dark:text-slate-400 mt-4">
           <span>
             Showing <strong>{filteredUsers.length}</strong> of <strong>{users.length}</strong> users
           </span>
         </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
+      <TableContainer>
+        <Table>
+          <TableHeader>
+            <tr>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('full_name')}
+              >
+                Name {getSortIcon('full_name')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('program_designation')}
+              >
+                Designation {getSortIcon('program_designation')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('email')}
+              >
+                Email ID {getSortIcon('email')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('phone')}
+              >
+                Contact No. {getSortIcon('phone')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('user_role')}
+              >
+                Role {getSortIcon('user_role')}
+              </TableHead>
+              <TableHead
+                className="cursor-pointer hover:bg-gray-100 dark:hover:bg-slate-800 transition"
+                onClick={() => handleSort('is_active')}
+              >
+                Status {getSortIcon('is_active')}
+              </TableHead>
+              <TableHead>Action</TableHead>
+            </tr>
+          </TableHeader>
+          <TableBody>
+            {filteredUsers.length === 0 ? (
               <tr>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('full_name')}
-                >
-                  Name {getSortIcon('full_name')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('program_designation')}
-                >
-                  Designation {getSortIcon('program_designation')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('email')}
-                >
-                  Email ID {getSortIcon('email')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('phone')}
-                >
-                  Contact No. {getSortIcon('phone')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('user_role')}
-                >
-                  Role {getSortIcon('user_role')}
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('is_active')}
-                >
-                  Status {getSortIcon('is_active')}
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Action
-                </th>
+                <TableCell colSpan={7} className="py-12 text-center text-gray-500 dark:text-slate-400">
+                  No users match your search criteria
+                </TableCell>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                    No users match your search criteria
-                  </td>
-                </tr>
-              ) : (
-                filteredUsers.map((user) => (
-                  <tr
-                    key={user.id}
-                    onClick={() => handleViewUserDetails(user)}
-                    className="hover:bg-gray-50 transition cursor-pointer"
-                  >
-                    <td className="px-6 py-4">
-                      <div className="flex items-center">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center mr-3">
-                          <span className="text-blue-700 font-medium">
-                            {user.full_name?.charAt(0).toUpperCase()}
-                          </span>
-                        </div>
-                        <p className="font-medium text-gray-900">{user.full_name}</p>
+            ) : (
+              filteredUsers.map((user) => (
+                <TableRow
+                  key={user.id}
+                  onClick={() => handleViewUserDetails(user)}
+                  className="cursor-pointer"
+                >
+                  <TableCell>
+                    <div className="flex items-center">
+                      <div className="w-9 h-9 rounded-full bg-blue-100 dark:bg-blue-950/80 flex items-center justify-center mr-3 shrink-0">
+                        <span className="text-blue-700 dark:text-blue-300 font-semibold text-sm">
+                          {user.full_name?.charAt(0).toUpperCase()}
+                        </span>
                       </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                      {user.program_designation || '-'}
-                    </td>
-                    <td className="px-6 py-4 text-gray-700">
-                      {user.email || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-gray-700">
-                      {user.phone || '-'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium capitalize ${
-                          user.user_role === 'admin'
-                            ? 'bg-gray-100 text-gray-800'
-                            : 'bg-blue-100 text-blue-800'
-                        }`}
-                      >
-                        {user.user_role}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          user.is_active
-                            ? 'bg-green-100 text-green-800'
-                            : 'bg-red-100 text-red-800'
-                        }`}
-                      >
-                        {user.is_active ? 'Active' : 'Inactive'}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewUserDetails(user);
-                        }}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-                        title="View details"
-                      >
-                        <Eye className="w-5 h-5" />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                      <p className="font-semibold text-gray-900 dark:text-slate-100">{user.full_name}</p>
+                    </div>
+                  </TableCell>
+                  <TableCell>
+                    {user.program_designation || '-'}
+                  </TableCell>
+                  <TableCell>
+                    {user.email || '-'}
+                  </TableCell>
+                  <TableCell>
+                    {user.phone || '-'}
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge
+                      status={user.user_role}
+                      variant={user.user_role === 'admin' ? 'purple' : 'blue'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge
+                      status={user.is_active ? 'Active' : 'Inactive'}
+                      variant={user.is_active ? 'emerald' : 'red'}
+                    />
+                  </TableCell>
+                  <TableCell>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleViewUserDetails(user);
+                      }}
+                      className="p-1.5 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/50 rounded-lg transition"
+                      title="View details"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </TableContainer>
 
       {showDetailsModal && selectedUser && (
         <UserDetailsModal

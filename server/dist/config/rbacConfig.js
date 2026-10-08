@@ -56,6 +56,8 @@ export const SC_LAB_RBAC_CONFIG = {
                 '/api/dashboard/**',
                 '/api/procurement-details',
                 '/api/procurement-details/**',
+                '/api/projects',
+                '/api/projects/**',
             ],
             action: ['read'],
             effect: 'allow',
@@ -66,6 +68,7 @@ export const SC_LAB_RBAC_CONFIG = {
             role: 'MEMBER',
             resource: [
                 '/api/auth/me',
+                '/api/auth/logout',
                 '/api/auth/change-password',
                 '/api/auth/verify-reset-token',
                 '/api/users',
@@ -74,6 +77,12 @@ export const SC_LAB_RBAC_CONFIG = {
                 '/api/purchase-requests/**',
                 '/api/leave-requests',
                 '/api/leave-requests/**',
+                '/api/inventory/requests',
+                '/api/inventory/requests/**',
+                '/api/inventory/*/bookings',
+                '/api/inventory/bookings/**',
+                '/api/facilities/*/bookings',
+                '/api/facilities/bookings/**',
                 '/api/work',
                 '/api/work/**',
                 '/api/assigned-works',
@@ -88,10 +97,22 @@ export const SC_LAB_RBAC_CONFIG = {
                 '/api/notifications/**',
                 '/api/repository',
                 '/api/repository/**',
+                '/api/daily-todos',
+                '/api/daily-todos/**',
+                '/api/mcp',
+                '/api/mcp/**',
             ],
             action: ['read', 'write', 'delete'],
             effect: 'allow',
-            priority: 10,
+            priority: 12,
+        },
+        // Project team members post and remove their own achievement updates; the route checks team membership
+        {
+            role: 'MEMBER',
+            resource: ['/api/projects/*/achievements', '/api/projects/*/achievements/*'],
+            action: ['write', 'delete'],
+            effect: 'allow',
+            priority: 12,
         },
         // Block MEMBER from Admin management & auditing endpoints
         {
@@ -157,16 +178,10 @@ export const SC_LAB_RBAC_CONFIG = {
             effect: 'allow',
             priority: 30,
         },
-        // Full data export/import is Super Admin only — explicitly deny ADMIN here even though
-        // /api/admin/** above would otherwise cover it, since this can read or replace the entire
-        // database and every uploaded file.
-        {
-            role: 'ADMIN',
-            resource: '/api/admin/backup/**',
-            action: ['read', 'write', 'delete'],
-            effect: 'deny',
-            priority: 35,
-        },
+        // Full data export/import (/api/admin/backup/**) is Super Admin only. The gateway only sees
+        // the role, and the bootstrap super admin account is stored with user_role 'admin', so the
+        // gateway lets ADMIN through via /api/admin/** above and routes/backup.ts enforces the real
+        // check (bootstrap super admin id or user_role 'super_admin'; every other admin gets 403).
         {
             role: 'SUPER_ADMIN',
             resource: '/api/**',
@@ -184,7 +199,7 @@ export const PERMISSION_POLICIES = {
     // Users & Roles
     'view_users': [{ role: '*', resource: ['/api/admin/users', '/api/users/**'], action: ['read'], effect: 'allow', priority: 90 }],
     'manage_users': [{ role: '*', resource: ['/api/admin/users', '/api/users/**'], action: ['read', 'write', 'delete'], effect: 'allow', priority: 90 }],
-    'manage_roles': [{ role: '*', resource: ['/api/admin/roles', '/api/roles/**'], action: ['read', 'write', 'delete'], effect: 'allow', priority: 90 }],
+    'manage_roles': [{ role: '*', resource: ['/api/admin/roles', '/api/roles/**', '/api/settings/roles', '/api/settings/roles/**', '/api/settings/permissions', '/api/settings/role-permissions/**'], action: ['read', 'write', 'delete'], effect: 'allow', priority: 90 }],
     // Facilities
     'view_facilities': [{ role: '*', resource: ['/api/facilities', '/api/facilities/**'], action: ['read'], effect: 'allow', priority: 90 }],
     'create_facilities': [{ role: '*', resource: '/api/facilities', action: ['write'], effect: 'allow', priority: 90 }],
@@ -210,6 +225,7 @@ export const PERMISSION_POLICIES = {
     'create_inventory': [{ role: '*', resource: ['/api/inventory', '/api/repository'], action: ['write'], effect: 'allow', priority: 90 }],
     'edit_inventory': [{ role: '*', resource: ['/api/inventory/**', '/api/repository/**'], action: ['write'], effect: 'allow', priority: 90 }],
     'delete_inventory': [{ role: '*', resource: ['/api/inventory/**', '/api/repository/**'], action: ['delete'], effect: 'allow', priority: 90 }],
+    'manage_inventory_requests': [{ role: '*', resource: ['/api/inventory/requests', '/api/inventory/requests/**'], action: ['read', 'write', 'delete'], effect: 'allow', priority: 90 }],
     // Repository
     'view_repository': [{ role: '*', resource: ['/api/admin/repository', '/api/admin/repository/**'], action: ['read'], effect: 'allow', priority: 90 }],
     'edit_repository_all': [{ role: '*', resource: ['/api/admin/repository', '/api/admin/repository/**'], action: ['write'], effect: 'allow', priority: 90 }],
@@ -219,9 +235,15 @@ export const PERMISSION_POLICIES = {
     'view_reports': [{ role: '*', resource: ['/api/admin/reports', '/api/admin/reports/**'], action: ['read'], effect: 'allow', priority: 90 }],
     'generate_reports': [{ role: '*', resource: ['/api/admin/reports', '/api/admin/reports/**'], action: ['write'], effect: 'allow', priority: 90 }],
     // Settings
-    'view_settings': [{ role: '*', resource: ['/api/settings', '/api/settings/**'], action: ['read'], effect: 'allow', priority: 90 }],
+    'view_settings': [{ role: '*', resource: ['/api/settings'], action: ['read'], effect: 'allow', priority: 90 }],
     'manage_settings': [{ role: '*', resource: ['/api/settings', '/api/settings/**'], action: ['read', 'write', 'delete'], effect: 'allow', priority: 90 }],
     // Notifications
     'view_notifications': [{ role: '*', resource: ['/api/notifications', '/api/notifications/**'], action: ['read'], effect: 'allow', priority: 90 }],
     'manage_notifications': [{ role: '*', resource: ['/api/notifications', '/api/notifications/**'], action: ['read', 'write', 'delete'], effect: 'allow', priority: 90 }],
+    // Project Tracker
+    'view_projects': [{ role: '*', resource: ['/api/projects', '/api/projects/**'], action: ['read'], effect: 'allow', priority: 90 }],
+    'create_projects': [{ role: '*', resource: ['/api/projects', '/api/projects/**'], action: ['write'], effect: 'allow', priority: 90 }],
+    'edit_projects': [{ role: '*', resource: ['/api/projects', '/api/projects/**'], action: ['write'], effect: 'allow', priority: 90 }],
+    'delete_projects': [{ role: '*', resource: ['/api/projects', '/api/projects/**'], action: ['delete'], effect: 'allow', priority: 90 }],
+    'add_project_achievement': [{ role: '*', resource: ['/api/projects/*/achievements', '/api/projects/**/achievements', '/api/projects/**'], action: ['write'], effect: 'allow', priority: 90 }],
 };

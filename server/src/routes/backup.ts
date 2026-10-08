@@ -9,8 +9,12 @@ import { logAuditEvent } from '../services/auditLogger.js';
 
 const router = Router();
 
+/** Bootstrap super admin seeded by initAdmin — stored with user_role 'admin'. */
+const BOOTSTRAP_SUPER_ADMIN_ID = '00000000-0000-0000-0000-000000000001';
+
+// The RBAC gateway lets every ADMIN reach /api/admin/backup/**; this is the authoritative check.
 function requireSuperAdmin(req: Request, res: Response): boolean {
-  if (req.user!.user_role !== 'super_admin') {
+  if (req.user!.user_role !== 'super_admin' && req.user!.id !== BOOTSTRAP_SUPER_ADMIN_ID) {
     res.status(403).json({ error: 'Only Super Admin can export or import portal data' });
     return false;
   }
@@ -60,8 +64,10 @@ const upload = multer({
 
 // POST /api/admin/backup/import — restores the database + uploaded files from a backup zip.
 // Always takes an automatic safety snapshot of the current state first.
-router.post('/import', authenticate, upload.single('backup'), async (req: Request, res: Response) => {
-  if (!requireSuperAdmin(req, res)) return;
+router.post('/import', authenticate, (req: Request, res: Response, next) => {
+  // Reject before multer writes a (potentially 2GB) upload to disk.
+  if (requireSuperAdmin(req, res)) next();
+}, upload.single('backup'), async (req: Request, res: Response) => {
 
   if (!req.file) {
     return res.status(400).json({ error: 'No backup file provided' });

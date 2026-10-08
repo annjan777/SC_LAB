@@ -3,6 +3,19 @@ import { Shield, Plus, Edit, Trash2, Users, X, Save, Download, Upload, AlertTria
 import { api, getStoredToken, setToken } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
 import type { Permission, RoleWithPermissions } from '../../lib/types';
+import {
+  PageHeader,
+  Button,
+  Card,
+  TableContainer,
+  Table,
+  TableHeader,
+  TableHead,
+  TableBody,
+  TableRow,
+  TableCell,
+  StatusBadge,
+} from '../../components/ui';
 
 interface RoleFormData {
   name: string;
@@ -254,139 +267,122 @@ export default function AdminSettingsPage() {
 
   if (loading) {
     return (
-      <div className="max-w-7xl mx-auto">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-          <p className="text-gray-600 mt-2">Configure lab management portal settings</p>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
-        </div>
+      <div className="max-w-7xl mx-auto space-y-6">
+        <PageHeader title="Settings" />
+        <Card className="p-12 text-center">
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-600 mx-auto"></div>
+          <p className="mt-4 sc-muted text-sm">Loading settings...</p>
+        </Card>
       </div>
     );
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Settings</h1>
-        <p className="text-gray-600 mt-2">Configure lab management portal settings</p>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Settings"
+        action={
+          <Button
+            variant="primary"
+            onClick={handleCreateRole}
+            leftIcon={<Plus className="w-4 h-4" />}
+          >
+            Create Role
+          </Button>
+        }
+      />
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-        <div className="p-6 border-b border-gray-200 flex items-center justify-between">
+      <Card className="overflow-hidden">
+        <div className="p-6 border-b border-gray-200 dark:border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <Shield className="w-6 h-6 text-blue-600" />
+            <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+              <Shield className="w-5 h-5" />
+            </div>
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Roles & Permissions</h2>
-              <p className="text-sm text-gray-600">
+              <h2 className="sc-section-title">Roles & Permissions</h2>
+              <p className="sc-muted text-sm">
                 Manage user roles and their permissions
               </p>
             </div>
           </div>
-          <button
-            onClick={handleCreateRole}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Create Role
-          </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Role Name
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Description
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Permissions
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Users
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Type
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
+        <TableContainer className="border-0 shadow-none rounded-none">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Role Name</TableHead>
+                <TableHead>Description</TableHead>
+                <TableHead>Permissions</TableHead>
+                <TableHead>Users</TableHead>
+                <TableHead>Type</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {roles.map((role) => (
-                <tr key={role.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="font-medium text-gray-900">{role.name}</div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-gray-600">
-                      {role.description || 'No description'}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="text-sm text-gray-900">
-                      {role.permissions.length} permission
-                      {role.permissions.length !== 1 ? 's' : ''}
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-2 text-sm text-gray-600">
+                <TableRow key={role.id}>
+                  <TableCell className="font-medium text-gray-900 dark:text-slate-100">
+                    {role.name}
+                  </TableCell>
+                  <TableCell className="text-gray-600 dark:text-slate-400">
+                    {role.description || 'No description'}
+                  </TableCell>
+                  <TableCell>
+                    {role.permissions.length} permission{role.permissions.length !== 1 ? 's' : ''}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2 text-gray-600 dark:text-slate-400">
                       <Users className="w-4 h-4" />
                       {userCounts[role.id] || 0}
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {role.is_system_role ? (
-                      <span className="px-2 py-1 text-xs font-medium bg-gray-100 text-gray-700 rounded">
-                        System
-                      </span>
-                    ) : (
-                      <span className="px-2 py-1 text-xs font-medium bg-blue-100 text-blue-700 rounded">
-                        Custom
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <div className="flex items-center justify-end gap-2">
-                      <button
+                  </TableCell>
+                  <TableCell>
+                    <StatusBadge
+                      status={role.is_system_role ? 'system' : 'custom'}
+                      label={role.is_system_role ? 'System' : 'Custom'}
+                      variant={role.is_system_role ? 'gray' : 'blue'}
+                    />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         onClick={() => handleEditRole(role)}
-                        className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
                         title="Edit role"
                       >
-                        <Edit className="w-4 h-4" />
-                      </button>
+                        <Edit className="w-4 h-4 text-blue-600" />
+                      </Button>
                       {!role.is_system_role && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="sm"
                           onClick={() => handleDeleteRole(role)}
-                          className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           title="Delete role"
                         >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                          <Trash2 className="w-4 h-4 text-red-600" />
+                        </Button>
                       )}
                     </div>
-                  </td>
-                </tr>
+                  </TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            </TableBody>
+          </Table>
+        </TableContainer>
+      </Card>
 
       {isSuperAdmin && (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mt-8">
-          <div className="p-6 border-b border-gray-200">
+        <Card className="overflow-hidden">
+          <div className="p-6 border-b border-gray-200 dark:border-slate-800">
             <div className="flex items-center gap-3">
-              <Download className="w-6 h-6 text-blue-600" />
+              <div className="p-2 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                <Download className="w-5 h-5" />
+              </div>
               <div>
-                <h2 className="text-xl font-semibold text-gray-900">Data Export &amp; Import</h2>
-                <p className="text-sm text-gray-600">
+                <h2 className="sc-section-title">Data Export &amp; Import</h2>
+                <p className="sc-muted text-sm">
                   Full backup and restore of the database and uploaded files. Super Admin only.
                 </p>
               </div>
@@ -394,42 +390,42 @@ export default function AdminSettingsPage() {
           </div>
 
           <div className="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="border border-gray-200 rounded-lg p-5">
-              <h3 className="font-medium text-gray-900 mb-1">Export Data</h3>
-              <p className="text-sm text-gray-600 mb-4">
+            <div className="border border-gray-200 dark:border-slate-800 rounded-xl p-5">
+              <h3 className="sc-card-title mb-1">Export Data</h3>
+              <p className="sc-muted text-sm mb-4">
                 Download a complete .zip snapshot of the database and all uploaded documents/images.
                 Keep this somewhere safe in case the server is lost.
               </p>
               {exportError && (
                 <div className="text-sm text-red-600 mb-3">{exportError}</div>
               )}
-              <button
+              <Button
+                variant="primary"
                 onClick={handleExport}
-                disabled={exporting}
-                className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50"
+                isLoading={exporting}
+                leftIcon={!exporting ? <Download className="w-4 h-4" /> : undefined}
               >
-                <Download className="w-4 h-4" />
                 {exporting ? 'Preparing export...' : 'Export Data'}
-              </button>
+              </Button>
             </div>
 
-            <div className="border border-red-200 bg-red-50 rounded-lg p-5">
-              <h3 className="font-medium text-gray-900 mb-1">Import Data</h3>
-              <p className="text-sm text-gray-700 mb-4">
+            <div className="border border-red-200 dark:border-red-900/40 bg-red-50/50 dark:bg-red-950/20 rounded-xl p-5">
+              <h3 className="sc-card-title text-red-900 dark:text-red-300 mb-1">Import Data</h3>
+              <p className="text-sm text-red-700 dark:text-red-400 mb-4">
                 Restores the database and files from a previously exported .zip.{' '}
                 <strong>This replaces all current data.</strong> A safety snapshot of what gets
                 replaced is taken automatically first, but this is still a destructive action.
               </p>
-              <button
+              <Button
+                variant="danger"
                 onClick={openImportModal}
-                className="flex items-center gap-2 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+                leftIcon={<Upload className="w-4 h-4" />}
               >
-                <Upload className="w-4 h-4" />
                 Import Data
-              </button>
+              </Button>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {showImportModal && (
@@ -492,7 +488,7 @@ export default function AdminSettingsPage() {
               <button
                 onClick={() => setShowImportModal(false)}
                 disabled={importing}
-                className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors disabled:opacity-50"
+                className="px-4 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -607,7 +603,7 @@ export default function AdminSettingsPage() {
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setShowRoleModal(false)}
-                  className="px-4 py-2 text-gray-700 hover:bg-gray-200 rounded-lg transition-colors"
+                  className="px-4 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-slate-700 rounded-lg transition-colors"
                 >
                   Cancel
                 </button>

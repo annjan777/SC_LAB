@@ -1,4 +1,5 @@
 import { query, transaction } from '../../config/database.js';
+import { tierForRole } from '../../utils/roleTier.js';
 export class IdentityRepository {
     async findUserById(id) {
         const result = await query(`SELECT id, full_name, email, user_role, role_id, is_active, department, program_designation, supervisor
@@ -12,10 +13,10 @@ export class IdentityRepository {
     async updateUserRoleAndPermissions(userId, userRole, roleId, permissionIds, grantedBy) {
         await transaction(async (client) => {
             if (roleId !== undefined) {
-                await client.query('UPDATE user_profiles SET role_id = $1 WHERE id = $2', [roleId, userId]);
+                await client.query("UPDATE user_profiles up SET role_id = r.id, user_role = CASE WHEN LOWER(r.name) IN ('super_admin','admin','lab_manager','researcher','student','guest','user') THEN LOWER(r.name) ELSE 'user' END FROM roles r WHERE r.id = $1 AND up.id = $2", [roleId, userId]);
             }
             if (userRole !== undefined) {
-                await client.query('UPDATE user_profiles SET user_role = $1 WHERE id = $2', [userRole, userId]);
+                await client.query('UPDATE user_profiles SET user_role = $1 WHERE id = $2', [tierForRole(userRole), userId]);
             }
             if (permissionIds !== undefined && Array.isArray(permissionIds)) {
                 await client.query('DELETE FROM user_permissions WHERE user_id = $1', [userId]);

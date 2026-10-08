@@ -184,6 +184,14 @@ export function validateEmail(
   return { isValid: true, email };
 }
 
+// Account created by the server on first boot (server/src/scripts/initAdmin.ts).
+const BOOTSTRAP_SUPER_ADMIN_ID = '00000000-0000-0000-0000-000000000001';
+
+export function isSuperAdmin(profile: any): boolean {
+  const role = String(profile?.user_role || '').toLowerCase();
+  return profile?.id === BOOTSTRAP_SUPER_ADMIN_ID || role === 'super_admin' || role === 'superadmin';
+}
+
 /**
  * Checks whether a user's profile data actually exists and is complete.
  * Returns false if required project and employment fields are missing,
@@ -191,6 +199,8 @@ export function validateEmail(
  */
 export function isProfileCompleted(profile: any): boolean {
   if (!profile) return false;
+  // The super admin is a system account, not lab staff: it has no project or contract to record.
+  if (isSuperAdmin(profile)) return true;
   if (profile.is_profile_completed === false) return false;
 
   const hasRequiredData = Boolean(

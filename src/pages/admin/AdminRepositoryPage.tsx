@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react';
-import { Upload, FileText, Search, Download, Eye, Trash2, X, FolderOpen, File, Edit, Share2, User, Users, ChevronDown, ChevronRight, Lock, Shield } from 'lucide-react';
-import { api } from '../../lib/api';
+import { Upload, FileText, Search, Download, Eye, Trash2, X, FolderOpen, File, Edit, Share2, User, Users, ChevronDown, ChevronRight, Lock, Shield, Link as LinkIcon, ExternalLink } from 'lucide-react';
+import { api, getStoredToken } from '../../lib/api';
 import { useAuth } from '../../contexts/AuthContext';
+import { PageHeader, Button, EmptyState } from '../../components/ui';
 
 interface RepositoryDocument {
   id: string;
   filename: string;
-  file_path: string;
+  file_path: string | null;
+  document_url?: string | null;
   file_type: string | null;
   category: string;
   title: string;
@@ -198,9 +200,14 @@ export default function AdminRepositoryPage() {
     }
   };
 
-  const handleDownloadDocument = async (documentId: string, filename: string) => {
+  const handleDownloadDocument = async (documentId: string, filename: string, documentUrl?: string | null) => {
+    if (documentUrl) {
+      window.open(documentUrl, '_blank');
+      return;
+    }
     try {
-      const url = `/api/repository/download/${documentId}`;
+      // A plain link can't send the Authorization header; the server accepts ?token= on download paths only.
+      const url = `/api/repository/download/${documentId}?token=${encodeURIComponent(getStoredToken() || '')}`;
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
@@ -274,9 +281,24 @@ export default function AdminRepositoryPage() {
                   Admin Only
                 </span>
               )}
+              {doc.document_url && !doc.file_path && (
+                <span className="flex-shrink-0 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700">
+                  <LinkIcon className="w-3 h-3 mr-1" />
+                  Link
+                </span>
+              )}
               {getVisibilityBadge(doc)}
             </div>
-            <p className="text-sm text-gray-500 truncate">{doc.filename}</p>
+            <p className="text-sm text-gray-500 truncate flex items-center gap-1.5">
+              {doc.document_url && !doc.file_path ? (
+                <>
+                  <ExternalLink className="w-3.5 h-3.5 text-blue-500 shrink-0" />
+                  <span className="truncate">{doc.document_url}</span>
+                </>
+              ) : (
+                <span>{doc.filename}</span>
+              )}
+            </p>
           </div>
         </div>
 
@@ -288,7 +310,13 @@ export default function AdminRepositoryPage() {
           <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
             {getCategoryLabel(doc.category)}
           </span>
-          <span className="text-xs text-gray-500">{formatFileSize(doc.file_size)}</span>
+          {doc.document_url && !doc.file_path ? (
+            <span className="text-xs text-blue-600 font-medium inline-flex items-center gap-1">
+              <LinkIcon className="w-3 h-3" /> Web Link
+            </span>
+          ) : (
+            <span className="text-xs text-gray-500">{formatFileSize(doc.file_size)}</span>
+          )}
         </div>
 
         {doc.tags && doc.tags.length > 0 && (
@@ -316,16 +344,16 @@ export default function AdminRepositoryPage() {
             <button
               onClick={() => handleViewDocument(doc.id)}
               className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition"
-              title="View"
+              title={doc.document_url && !doc.file_path ? "Open Link" : "View"}
             >
               <Eye className="w-5 h-5" />
             </button>
             <button
-              onClick={() => handleDownloadDocument(doc.id, doc.filename)}
+              onClick={() => handleDownloadDocument(doc.id, doc.filename, doc.document_url)}
               className="p-2 text-green-600 hover:bg-green-50 rounded-lg transition"
-              title="Download"
+              title={doc.document_url && !doc.file_path ? "Open Link" : "Download"}
             >
-              <Download className="w-5 h-5" />
+              {doc.document_url && !doc.file_path ? <ExternalLink className="w-5 h-5" /> : <Download className="w-5 h-5" />}
             </button>
             {canShare && (
               <button
@@ -353,7 +381,7 @@ export default function AdminRepositoryPage() {
             )}
             {(doc.uploaded_by === user?.id || canDeleteAll) && (
               <button
-                onClick={() => handleDeleteDocument(doc.id, doc.file_path)}
+                onClick={() => handleDeleteDocument(doc.id, doc.file_path || '')}
                 className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition"
                 title="Delete"
               >
@@ -375,24 +403,23 @@ export default function AdminRepositoryPage() {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="mb-6 sm:mb-8 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900">Repository Management</h1>
-          <p className="text-sm sm:text-base text-gray-600 mt-1">Manage all documents, user uploads, and admin resources</p>
-        </div>
-        <button
-          onClick={() => setShowUploadModal(true)}
-          className="px-4 py-2 text-sm sm:text-base bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition flex items-center justify-center gap-2 shadow-sm w-full sm:w-auto"
-        >
-          <Upload className="w-5 h-5" />
-          <span>Upload Document</span>
-        </button>
-      </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      <PageHeader
+        title="Repository Management"
+        action={
+          <Button
+            variant="primary"
+            onClick={() => setShowUploadModal(true)}
+            leftIcon={<Upload className="w-4 h-4" />}
+          >
+            Upload Document
+          </Button>
+        }
+      />
 
       {message && (
         <div
-          className={`mb-6 p-4 rounded-lg ${
+          className={`p-4 rounded-lg ${
             message.type === 'success'
               ? 'bg-green-50 border border-green-200 text-green-800'
               : 'bg-red-50 border border-red-200 text-red-800'
@@ -407,7 +434,7 @@ export default function AdminRepositoryPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 mb-6">
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200">
         <div className="border-b border-gray-200">
           <div className="flex">
             <button
@@ -552,26 +579,24 @@ export default function AdminRepositoryPage() {
           ))}
         </div>
       ) : filteredDocuments.length === 0 ? (
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-          <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-          <h3 className="text-lg font-medium text-gray-900 mb-2">No Documents Found</h3>
-          <p className="text-gray-600 mb-6">
-            {searchTerm || selectedCategory
+        <EmptyState
+          icon={FileText}
+          title="No Documents Found"
+          description={
+            searchTerm || selectedCategory
               ? 'No documents match your search criteria'
               : activeTab === 'my_documents'
               ? 'Upload your first admin document to get started'
-              : 'No documents available'}
-          </p>
-          {!searchTerm && !selectedCategory && activeTab === 'my_documents' && (
-            <button
-              onClick={() => setShowUploadModal(true)}
-              className="inline-flex items-center gap-2 bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
-            >
-              <Upload className="h-5 w-5" />
-              Upload Document
-            </button>
-          )}
-        </div>
+              : 'No documents available'
+          }
+          actionText={
+            !searchTerm && !selectedCategory && activeTab === 'my_documents'
+              ? 'Upload Document'
+              : undefined
+          }
+          actionIcon={<Upload className="w-4 h-4" />}
+          onAction={() => setShowUploadModal(true)}
+        />
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredDocuments.map((doc) => renderDocumentCard(doc))}
@@ -641,7 +666,9 @@ function UploadDocumentModal({ onClose, onSuccess, users }: UploadDocumentModalP
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [inputType, setInputType] = useState<'file' | 'link'>('file');
   const [file, setFile] = useState<File | null>(null);
+  const [documentUrl, setDocumentUrl] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     description: '',
@@ -661,16 +688,24 @@ function UploadDocumentModal({ onClose, onSuccess, users }: UploadDocumentModalP
     setUploadProgress(0);
 
     try {
-      if (!file) {
-        setError('Please select a file to upload');
-        setLoading(false);
-        return;
-      }
+      if (inputType === 'file') {
+        if (!file) {
+          setError('Please select a file to upload');
+          setLoading(false);
+          return;
+        }
 
-      if (file.size > 50 * 1024 * 1024) {
-        setError('File size must be less than 50MB');
-        setLoading(false);
-        return;
+        if (file.size > 50 * 1024 * 1024) {
+          setError('File size must be less than 50MB');
+          setLoading(false);
+          return;
+        }
+      } else {
+        if (!documentUrl.trim()) {
+          setError('Please enter a document link / URL');
+          setLoading(false);
+          return;
+        }
       }
 
       setUploadProgress(30);
@@ -681,8 +716,13 @@ function UploadDocumentModal({ onClose, onSuccess, users }: UploadDocumentModalP
         .filter(tag => tag.length > 0);
 
       const uploadData = new FormData();
-      uploadData.append('file', file);
-      uploadData.append('title', formData.title || file.name);
+      if (inputType === 'file' && file) {
+        uploadData.append('file', file);
+        uploadData.append('title', formData.title || file.name);
+      } else {
+        uploadData.append('document_url', documentUrl.trim());
+        uploadData.append('title', formData.title || 'Document Link');
+      }
       uploadData.append('category', formData.category);
       if (formData.description) uploadData.append('description', formData.description);
       uploadData.append('tags', JSON.stringify(tagsArray));
@@ -743,21 +783,77 @@ function UploadDocumentModal({ onClose, onSuccess, users }: UploadDocumentModalP
             </div>
           )}
 
+          {/* Mode Switch: Upload File vs Document Link */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              File <span className="text-red-500">*</span>
+              Document Source <span className="text-red-500">*</span>
             </label>
-            <input
-              type="file"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              required
-              disabled={loading}
-            />
-            <p className="text-sm text-gray-500 mt-1">
-              Maximum file size: 50MB
-            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setInputType('file')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border text-sm font-semibold transition ${
+                  inputType === 'file'
+                    ? 'border-blue-600 bg-blue-50/80 text-blue-700 shadow-sm'
+                    : 'border-gray-200 hover:border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <FileText className="w-4 h-4" />
+                <span>Upload Document File</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setInputType('link')}
+                className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border text-sm font-semibold transition ${
+                  inputType === 'link'
+                    ? 'border-blue-600 bg-blue-50/80 text-blue-700 shadow-sm'
+                    : 'border-gray-200 hover:border-gray-300 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <LinkIcon className="w-4 h-4" />
+                <span>Document Link / URL</span>
+              </button>
+            </div>
           </div>
+
+          {inputType === 'file' ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                File <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="file"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                required={inputType === 'file'}
+                disabled={loading}
+              />
+              <p className="text-sm text-gray-500 mt-1">
+                Maximum file size: 50MB (PDF, DOCX, XLSX, etc.)
+              </p>
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Document Web Link / URL <span className="text-red-500">*</span>
+              </label>
+              <div className="relative">
+                <LinkIcon className="absolute left-3 top-2.5 w-4 h-4 text-gray-400" />
+                <input
+                  type="url"
+                  value={documentUrl}
+                  onChange={(e) => setDocumentUrl(e.target.value)}
+                  className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="https://drive.google.com/... or OneDrive / cloud link"
+                  required={inputType === 'link'}
+                  disabled={loading}
+                />
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Paste the link to your cloud document instead of downloading and uploading the file.
+              </p>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
@@ -872,7 +968,7 @@ function UploadDocumentModal({ onClose, onSuccess, users }: UploadDocumentModalP
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               disabled={loading}
             >
               Cancel
@@ -968,11 +1064,11 @@ function EditDocumentModal({ document, onClose, onSuccess, users }: EditDocument
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-2">
-              Filename (Read-only)
+              {document.document_url && !document.file_path ? 'Document Link (Read-only)' : 'Filename (Read-only)'}
             </label>
             <input
               type="text"
-              value={document.filename}
+              value={document.document_url && !document.file_path ? document.document_url : document.filename}
               disabled
               className="w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500"
             />
@@ -1091,7 +1187,7 @@ function EditDocumentModal({ document, onClose, onSuccess, users }: EditDocument
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               disabled={loading}
             >
               Cancel
@@ -1203,7 +1299,7 @@ function ShareDocumentModal({ document, users, onClose, onSuccess }: ShareDocume
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50"
+              className="px-6 py-2 border border-gray-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-gray-700 dark:text-slate-200 rounded-lg hover:bg-gray-50 dark:hover:bg-slate-700 transition"
               disabled={loading}
             >
               Cancel
