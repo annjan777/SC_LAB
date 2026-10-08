@@ -577,6 +577,36 @@ export function registerTools(server: McpServer) {
     }));
   });
 
+  const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+  tool('create_project', {
+    title: 'Create a project',
+    description: 'Adds a project to the lab project tracker (needs the create_projects permission). Tracker ID is generated automatically. Dates are YYYY-MM-DD. team is a list of {name} for external people or {id, name, email} for lab members.',
+    inputSchema: {
+      project_title: z.string().min(1).max(255),
+      project_code: z.string().max(100).optional(),
+      funding_agency: z.string().max(255).optional(),
+      proposal_link: z.string().optional(),
+      category: z.string().max(100).optional(),
+      status: z.string().max(50).optional(),
+      overview: z.string().optional(),
+      plan_next_phase: z.string().optional(),
+      start_date: isoDate.optional(),
+      closing_date: isoDate.optional(),
+      last_funder_review: isoDate.optional(),
+      last_weekly_update: isoDate.optional(),
+      faculty_lead_pi: z.string().max(255).optional(),
+      accountable_owner_poc: z.string().max(255).optional(),
+      team: z.array(z.object({ id: z.string().uuid().optional(), name: z.string().min(1), email: z.string().optional(), is_external: z.boolean().optional() })).optional(),
+      rag_status: z.enum(['Green', 'Amber', 'Red', 'Grey']).optional(),
+      update_status: z.string().max(50).optional(),
+      data_gaps_flags: z.string().optional(),
+      open_actions: z.number().int().min(0).optional(),
+      overdue_actions: z.number().int().min(0).optional(),
+      staff_on_payroll: z.string().max(100).optional(),
+    },
+    annotations: WRITE,
+  }, async (a, c) => api(c, 'POST', '/api/projects', { body: a }));
+
   tool('add_project_achievement', {
     title: 'Post a project achievement',
     description: 'Posts an "achieved till date" update to one of the member\'s projects (id from list_projects). Only members of that project\'s team can post.',
